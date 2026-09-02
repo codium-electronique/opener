@@ -1,0 +1,47 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+
+board:
+  name: cod_nrp_gw
+  full_name: Codium NR+ Gateway
+  vendor: codium
+  socs:
+  - name: nrf9151
+    variants:
+    - name: 'ns'
+  revision:
+    format: major.minor.patch
+    default: "0.1.0"
+    revisions:
+    - name: "0.1.0"
+runners:
+  run_once:
+    '--recover':
+      - runners:
+          - nrfjprog
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - cod_nrp_gw/nrf9151
+              - cod_nrp_gw/nrf9151/ns
+    '--erase':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - cod_nrp_gw/nrf9151
+              - cod_nrp_gw/nrf9151/ns
+    '--reset':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: last
+        groups:
+          - boards:
+              - cod_nrp_gw/nrf9151
+              - cod_nrp_gw/nrf9151/ns

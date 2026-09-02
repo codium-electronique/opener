@@ -1,0 +1,7 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+#
+# Codium COD NRP GW board configuration
+
+config BOARD_COD_NRP_GW
+	select SOC_NRF9151_LACA
