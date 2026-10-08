@@ -1,0 +1,85 @@
+/*
+* Copyright (c) 2025 Codium Electronique SAS
+* All rights reserved.
+*/
+
+#include "cod_nrp_node_nrf9151_common-pinctrl.dtsi"
+
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+    model = "Codium COD NRP NODE - nRF9151";
+    compatible = "codium,cod-nrp-node-nrf9151";
+
+    chosen {
+		zephyr,flash = &flash0;
+		zephyr,console = &uart0;
+		zephyr,shell-uart = &uart0;
+		zephyr,uart-mcumgr = &uart0;
+    };
+};
+
+&adc {
+    status = "disabled";
+};
+
+&gpiote {
+    status = "okay";
+};
+
+&gpio0 {
+    status = "okay";
+};
+
+// UART 0 for logs and shell in secure and non-secure worlds
+&uart0 {
+    status = "okay";
+    current-speed = <115200>;
+    /delete-property/ hw-flow-control;
+
+    pinctrl-0 = <&uart0_default>;
+    pinctrl-1 = <&uart0_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&uart1 {
+    status = "disabled";
+};
+
+&i2c2 {
+    compatible = "nordic,nrf-twim";
+    status = "disabled";
+    clock-frequency = <400000>;
+    pinctrl-0 = <&i2c2_default>;
+    pinctrl-1 = <&i2c2_sleep>;
+    pinctrl-names = "default", "sleep";
+};
+
+&spi3 {
+    compatible = "nordic,nrf-spim";
+    status = "okay";
+    zephyr,pm-device-runtime-auto;
+
+    cs-gpios = <&gpio0 31 GPIO_ACTIVE_LOW>;
+    pinctrl-0 = <&spi3_default>;
+    pinctrl-1 = <&spi3_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    mx25r1635f: mx25r1635f@0 {
+        compatible = "jedec,spi-nor";
+        status = "okay";
+        zephyr,pm-device-runtime-auto;
+
+        reg = <0>;
+        spi-max-frequency = <8000000>;
+        size = <16777216>; // 16 Mib
+        has-dpd;
+        t-enter-dpd = <10000>;
+        t-exit-dpd = <35000>;
+        jedec-id = [c2 28 15];
+        mxicy,mx25r-power-mode = "low-power";
+    };
+};
+
+/* Include default memory partition configuration file */
+#include <nordic/nrf91xx_partition.dtsi>

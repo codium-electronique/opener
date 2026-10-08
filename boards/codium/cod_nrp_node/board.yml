@@ -1,0 +1,52 @@
+# Copyright (c) 2025 Codium Electronique
+# All rights reserved.
+
+board:
+  name: cod_nrp_node
+  full_name: COD NRP NODE
+  vendor: codium
+  socs:
+  - name: nrf9151
+    variants:
+    - name: 'ns'
+  - name: nrf54l15
+    variants:
+      - name: 'ns'
+        cpucluster: cpuapp
+runners:
+  run_once:
+    '--recover':
+      - runners:
+          - nrfjprog
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - cod_nrp_node/nrf9151
+              - cod_nrp_node/nrf9151/ns
+              - cod_nrp_node/nrf54l15/cpuapp
+              - cod_nrp_node/nrf54l15/cpuapp/ns
+    '--erase':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: first
+        groups:
+          - boards:
+              - cod_nrp_node/nrf9151
+              - cod_nrp_node/nrf9151/ns
+              - cod_nrp_node/nrf54l15/cpuapp
+              - cod_nrp_node/nrf54l15/cpuapp/ns
+    '--reset':
+      - runners:
+          - nrfjprog
+          - jlink
+          - nrfutil
+        run: last
+        groups:
+          - boards:
+              - cod_nrp_node/nrf9151
+              - cod_nrp_node/nrf9151/ns
+              - cod_nrp_node/nrf54l15/cpuapp
+              - cod_nrp_node/nrf54l15/cpuapp/ns

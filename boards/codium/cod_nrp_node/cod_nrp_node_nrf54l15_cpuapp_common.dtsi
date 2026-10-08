@@ -1,0 +1,144 @@
+/*
+ * Copyright (c) 2025 Codium Electronique
+ * All rights reserved.
+ */
+
+#include "cod_nrp_node_nrf54l15_common.dtsi"
+
+/ {
+	chosen {
+		zephyr,console = &uart30;
+		zephyr,shell-uart = &uart30;
+		zephyr,uart-mcumgr = &uart30;
+		zephyr,bt-mon-uart = &uart30;
+		zephyr,flash-controller = &rram_controller;
+		zephyr,flash = &cpuapp_rram;
+		zephyr,boot-mode = &boot_mode0;
+	};
+};
+
+&bt_hci_controller {
+	status = "disabled";
+};
+
+&bt_hci_sdc {
+	status = "disabled";
+};
+
+&gpio0 {
+	status = "disabled";
+	//sense-edge-mask = <((1 << 1))>;
+};
+
+&gpio1 {
+	status = "disabled";
+};
+
+&gpio2 {
+	status = "disabled";
+	//sense-edge-mask = <((1 << 9) | (1 << 10))>;
+};
+
+&gpiote20 {
+	status = "disabled";
+};
+
+&gpiote30 {
+	status = "disabled";
+};
+
+&uart00 {
+	status = "disabled";
+};
+
+&uart20 {
+	status = "disabled";
+};
+
+&uart21 {
+	status = "disabled";
+};
+
+&uart30 {
+	status = "okay";
+	current-speed = <115200>;
+	/delete-property/ hw-flow-control;
+	zephyr,pm-device-runtime-auto;
+
+	pinctrl-0 = <&uart30_default>;
+	pinctrl-1 = <&uart30_sleep>;
+	pinctrl-names = "default", "sleep";
+};
+
+&cpuapp_sram {
+	status = "okay";
+};
+
+&lfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <17000>;
+};
+
+&hfxo {
+	load-capacitors = "internal";
+	load-capacitance-femtofarad = <15000>;
+	startup-time-us = <854>;
+};
+
+&regulators {
+	status = "okay";
+};
+
+&vregmain {
+	status = "okay";
+	regulator-initial-mode = <NRF5X_REG_MODE_DCDC>;
+};
+
+&grtc {
+	owned-channels = <0 1 2 3 4 5 6 7 8 9 10 11>;
+	/* Channels 7-11 reserved for Zero Latency IRQs, 3-4 for FLPR */
+	child-owned-channels = <3 4 7 8 9 10 11>;
+	status = "okay";
+};
+
+&nfct {
+	status = "disabled";
+};
+
+&radio {
+	status = "okay";
+};
+
+&ieee802154 {
+	status = "disabled";
+};
+
+&clock {
+	status = "okay";
+};
+
+&gpregret1 {
+	status = "okay";
+
+	boot_mode0: boot_mode@0 {
+		compatible = "zephyr,retention";
+		status = "okay";
+		reg = <0x0 0x1>;
+	};
+};
+
+&spi00 {
+	status = "disabled";
+};
+
+&adc {
+	status = "disabled";
+};
+
+&comp {
+	status = "disabled";
+};
+
+&temp {
+	status = "disabled";
+};

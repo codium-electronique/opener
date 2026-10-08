@@ -1,0 +1,10 @@
+int InitTarget(void) {
+  // The nRF54L15 CTRL-AP lock is a software lock cleared on core reset. Connecting
+  // under reset keeps it from ever appearing secured, so J-Link never falls back
+  // to its "device is secured, erase to unsecure?" recovery (which mass-erases
+  // the whole flash, including the bootloader chain below the app partition).
+  // ResetType 3 = Connect Under Reset
+  JLINK_SYS_Report("Initializing nRF54L15, use reset type 3 (connect under reset)");
+  JLINK_ResetType = 3;
+  return 0;
+}

@@ -1,0 +1,90 @@
+/*
+ * Copyright (c) 2025 Codium Electronique
+ * All rights reserved.
+ */
+
+/dts-v1/;
+
+#define USE_NON_SECURE_ADDRESS_MAP 1
+
+#include <arm/nordic/nrf54l15_cpuapp_ns.dtsi>
+#include "cod_nrp_node_nrf54l15_cpuapp_common.dtsi"
+
+/ {
+	compatible = "codium,cod_nrp_node_nrf54l15-cpuapp";
+	model = "Codium COD NRP NODE nRF54L15 Application MCU";
+
+	chosen {
+		zephyr,code-partition = &slot0_ns_partition;
+		zephyr,sram = &sram0_ns;
+		zephyr,entropy = &psa_rng;
+
+		zephyr,bt-c2h-uart = &uart20;
+		zephyr,bt-hci = &bt_hci_sdc;
+		//codlibz,bt-reset = &nrf54l15_reset;
+		//codlibz,bt-crash = &nrf54l15_crash;
+	};
+
+	/delete-node/ rng;
+
+	psa_rng: psa-rng {
+		status = "okay";
+	};
+
+    /* FIXME: use proper pins on rev B */
+	/*nrf54l15_reset: nrf54l15-reset {
+		compatible = "codium,bt-reset";
+		status = "okay";
+
+		// Labeled INT1 on schematic
+		reset-gpios = <&gpio1 5 GPIO_ACTIVE_HIGH>;
+	};
+
+	nrf54l15_crash: nrf54l15-crash {
+		compatible = "codium,bt-crash";
+		status = "okay";
+
+		// Labeled INT2 on schematic
+		crash-gpios = <&gpio1 4 GPIO_ACTIVE_HIGH>;
+	};*/
+};
+
+&bt_hci_sdc {
+	status = "okay";
+};
+
+&gpio1 {
+	status = "okay";
+	sense-edge-mask = <((1 << 5) | (1 << 8) | (1 << 9))>;
+};
+
+/* GPIO Tasks and Events for port P1 */
+&gpiote20 {
+	status = "okay";
+};
+
+/*&uart20 {
+	status = "okay";
+	current-speed = <1000000>;
+	/delete-property/ hw-flow-control;
+	zephyr,pm-device-runtime-auto;
+
+	pinctrl-0 = <&uart20_default>;
+	pinctrl-1 = <&uart20_sleep>;
+	pinctrl-names = "default", "sleep";
+
+	// req: output, on P0.00 - rdy: input, on P0.01
+	lpuart: nrf-sw-lpuart {
+		compatible = "nordic,nrf-sw-lpuart";
+		status = "okay";
+		req-pin = <40>; // P1.08 -> 32+8
+		rdy-pin = <41>; // P1.09 -> 32+9
+	};
+};*/
+
+&uart30 {
+	status = "okay";
+};
+
+/* Include default memory partition configuration file */
+#include <vendor/nordic/nrf54l15_cpuapp_ns_partition.dtsi>

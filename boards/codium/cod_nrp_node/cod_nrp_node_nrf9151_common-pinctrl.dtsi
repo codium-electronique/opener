@@ -1,0 +1,95 @@
+/*
+ * Copyright (c) 2025 Codium Electronique SAS
+ * All rights reserved.
+ */
+
+&pinctrl {
+    /* For bootloader and TF-M logs */
+    /omit-if-no-ref/
+    uart0_default: uart0_default {
+        /* No UART on schematics, use pins GPIO0.26 / 27 (not connected) for TF-M uart */
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 26)>;
+        };
+        group2 {
+            psels = <NRF_PSEL(UART_RX, 0, 27)>;
+            bias-pull-up;
+        };
+    };
+
+    /omit-if-no-ref/
+    uart0_sleep: uart0_sleep {
+        group1 {
+            psels = <NRF_PSEL(UART_TX, 0, 26)>,
+                    <NRF_PSEL(UART_RX, 0, 27)>;
+            low-power-enable;
+        };
+    };
+
+    /* BLE HCI UART Low-Power
+     * FIXME: use proper pins for REV B */
+    /* /omit-if-no-ref/
+    uart1_default: uart1_default {
+		group1 {
+			psels = <NRF_PSEL(UART_TX, 0, 9)>;
+		};
+
+        group2 {
+            psels = <NRF_PSEL(UART_RX, 0, 8)>;
+            bias-pull-up;
+        };
+	};
+
+    /omit-if-no-ref/
+	uart1_sleep: uart1_sleep {
+        group1 {
+			psels = <NRF_PSEL(UART_RX, 0, 8)>;
+			low-power-enable;
+		};
+
+		group2 {
+			psels = <NRF_PSEL(UART_TX, 0, 9)>;
+			low-power-enable;
+			bias-pull-up;
+		};
+	}; */
+
+    /* I2C accelero + sht40 */
+    /omit-if-no-ref/
+    i2c2_default: i2c2_default {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 1)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 2)>;
+        };
+    };
+
+    /omit-if-no-ref/
+    i2c2_sleep: i2c2_sleep {
+        group1 {
+            psels = <NRF_PSEL(TWIM_SDA, 0, 1)>,
+                    <NRF_PSEL(TWIM_SCL, 0, 2)>;
+            low-power-enable;
+        };
+    };
+
+    /* Flash memory */
+    /omit-if-no-ref/
+    spi3_default: spi3_default {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 28)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 30)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 29)>;
+			nordic,drive-mode = <NRF_DRIVE_H0H1>;
+        };
+    };
+
+    /omit-if-no-ref/
+    spi3_sleep: spi3_sleep {
+        group1 {
+            psels = <NRF_PSEL(SPIM_SCK, 0, 28)>,
+                    <NRF_PSEL(SPIM_MISO, 0, 30)>,
+                    <NRF_PSEL(SPIM_MOSI, 0, 29)>;
+            low-power-enable;
+        };
+    };
+};

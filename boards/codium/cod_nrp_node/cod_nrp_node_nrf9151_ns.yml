@@ -1,0 +1,20 @@
+# Copyright (c) 2025 Codium Electronique
+# All rights reserved.
+
+identifier: cod_nrp_node/nrf9151/ns
+name: COD-NRP-NODE-NRF9151-Non-Secure
+type: mcu
+arch: arm
+toolchain:
+  - gnuarmemb
+  - zephyr
+ram: 128
+flash: 192
+supported:
+  - gpio
+  - spi
+  - i2c
+  - watchdog
+  - netif:modem
+vendor: codium
+sysbuild: true

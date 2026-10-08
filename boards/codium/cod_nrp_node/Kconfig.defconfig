@@ -1,0 +1,52 @@
+# Copyright (c) 2025 Codium Electronique
+# All rights reserved.
+#
+# Codium COD NRP NODE board configuration
+
+config HW_STACK_PROTECTION
+	default ARCH_HAS_STACK_PROTECTION
+
+if BOARD_COD_NRP_NODE_NRF9151 || BOARD_COD_NRP_NODE_NRF9151_NS
+
+config BOARD_COD_NRP_NODE
+	select USE_DT_CODE_PARTITION if BOARD_COD_NRP_NODE_NRF9151_NS
+
+config BT_HCI_VS
+	default y if BT
+
+config BT_WAIT_NOP
+	default BT && $(dt_nodelabel_enabled,nrf54l15_reset)
+
+config BOARD_LSM6DSL
+	bool
+	default n
+	default y if $(dt_nodelabel_enabled,lsm6dsl)
+	select CONFIG_LSM6DSL
+	select CONFIG_LSM6DSL_TRIGGER_OWN_THREAD
+	select CONFIG_LSM6DSL_EXT0_LIS2MDL
+
+config BOARD_LIS2MDL
+	bool
+	default n
+	default y if $(dt_nodelabel_enabled,lsm6dsl)
+	#select CONFIG_LIS2MDL
+
+endif # BOARD_COD_NRP_NODE_NRF9151 || BOARD_COD_NRP_NODE_NRF9151_NS
+
+if BOARD_COD_NRP_NODE_NRF54L15_CPUAPP_NS
+
+config BOARD_COD_NRP_NODE
+	select USE_DT_CODE_PARTITION if BOARD_COD_NRP_NODE_NRF54L15_CPUAPP_NS
+
+config HAS_BT_CTLR
+	default BT
+
+config BT_WAIT_NOP
+	default BT && $(dt_nodelabel_enabled,nrf54l15_reset)
+
+# By default, if we build for a Non-Secure version of the board,
+# enable building with TF-M as the Secure Execution Environment.
+config BUILD_WITH_TFM
+	default y
+
+endif # BOARD_COD_NRP_NODE_NRF54L15_CPUAPP_NS

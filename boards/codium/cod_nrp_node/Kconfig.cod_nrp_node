@@ -1,0 +1,8 @@
+# Copyright (c) 2025 Codium Electronique SAS
+# All rights reserved.
+#
+# Codium COD NRP NODE board configuration
+
+config BOARD_COD_NRP_NODE
+	select SOC_NRF9151_LACA if BOARD_COD_NRP_NODE_NRF9151 || BOARD_COD_NRP_NODE_NRF9151_NS
+	select SOC_NRF54L15_CPUAPP if BOARD_COD_NRP_NODE_NRF54L15_CPUAPP || BOARD_COD_NRP_NODE_NRF54L15_CPUAPP_NS

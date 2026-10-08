@@ -1,0 +1,137 @@
+/*
+ * Copyright (c) 2025 Codium Electronique SAS
+ * All rights reserved.
+ */
+
+/dts-v1/;
+
+#include <arm/nordic/nrf9151_ns_laca.dtsi>
+#include "cod_nrp_node_nrf9151_common.dtsi"
+
+/ {
+    chosen {
+        zephyr,flash = &flash0;
+        zephyr,sram = &sram0_ns_app;
+        zephyr,code-partition = &slot0_ns_partition;
+        //zephyr,bt-hci=&bt_hci_uart;
+        //codlibz,bt-reset = &nrf54l15_reset;
+        //codlibz,bt-crash = &nrf54l15_crash;
+        //codlibz,c2p-prov-uart = &uart0;
+    };
+
+    buttons {
+		compatible = "gpio-keys";
+		button1: button1 {
+			gpios = <&gpio0 0 GPIO_ACTIVE_HIGH>;
+			label = "User Button";
+		};
+	};
+
+    /* FIXME: Enable and set proper pins for REV B */
+    /*nrf54l15_reset: nrf54l15-reset {
+        compatible = "codium,bt-reset";
+        status = "okay";
+
+        reset-gpios = <&gpio0 5 GPIO_ACTIVE_HIGH>;
+    };
+
+    nrf54l15_crash: nrf54l15-crash {
+        compatible = "codium,bt-crash";
+        status = "okay";
+
+        crash-gpios = <&gpio0 4 GPIO_ACTIVE_HIGH>;
+    };*/
+};
+
+&gpio0 {
+    // Use sense mechanism for GPIO edge detection on BLE LPUART REQ / RDY and inputs
+    // nRF54L15 crash
+    sense-edge-mask = <((1 << 0) | (1 << 4))>;
+};
+
+&gpiote {
+    // Interrupts higher priority to lower radio latency
+    interrupts = <49 NRF_DEFAULT_IRQ_PRIORITY>;
+};
+
+/* FIXME: re-enable and set proper pins for rev B */
+/*&uart1 {
+    status = "okay";
+    current-speed = <1000000>;
+    /delete-property/ hw-flow-control;
+    zephyr,pm-device-runtime-auto;
+
+    pinctrl-0 = <&uart1_default>;
+    pinctrl-1 = <&uart1_sleep>;
+    pinctrl-names = "default", "sleep";
+
+    lpuart: nrf-sw-lpuart {
+        compatible = "nordic,nrf-sw-lpuart";
+        status = "okay";
+        req-pin = <4>; // P0.04
+        rdy-pin = <5>; // P0.05
+
+        bt_hci_uart: bt_hci_uart {
+            compatible = "zephyr,bt-hci-uart";
+            status = "okay";
+        };
+    };
+};*/
+
+&i2c2 {
+    status = "okay";
+
+    // STMicroelectronics LSM6DSL 6-axis accelerometer and gyrometer accessed throug i2c bus
+    lsm6dsl: lsm6dsl@6a {
+        compatible = "st,lsm6dsl";
+        status = "okay";
+        reg = <0x6A>;
+        irq-gpios = <&gpio0 3 GPIO_ACTIVE_HIGH>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        // STMicroelectronics LIS2MDL magnetometer integrated with LSM6DSL
+        lis2mdl: lis2mdl@40 {
+            compatible = "st,lis2mdl";
+            status = "okay";
+            reg = <0x40>;
+        };
+    };
+
+    sht40: sht4x@44 {
+        compatible = "sensirion,sht4x";
+        status = "okay";
+        repeatability = <2>;
+        reg = <0x44>;
+        friendly-name = "sht40";
+    };
+
+    //PMIC npm1300
+    npm1300: npm1300@6b {
+        compatible = "nordic,npm1300";
+        status = "okay";
+        reg = <0x6b>;
+
+        npm1300_charger: npm1300-charger {
+            compatible = "nordic,npm1300-charger";
+            status = "okay";
+            charging-enable;
+            term-microvolt = <4200000>; //uV => 4.2V
+            current-microamp = <500000>; // uA => 500mA
+            dischg-limit-microamp = <1000000>; // uA => 200mA
+            vbus-limit-microamp = <500000>; // uA => 500mA
+            thermistor-ohms = <0>; // Ohms => 0Ohms
+            thermistor-beta = <0>;
+            term-current-percent = <10>;
+        };
+
+        npm1300_led: npm1300-led {
+            compatible = "nordic,npm1300-led";
+            status = "okay";
+            nordic,led0-mode = "host";
+            nordic,led1-mode = "charging";
+            nordic,led2-mode = "error";
+
+        };
+    };
+};

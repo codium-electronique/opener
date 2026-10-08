@@ -1,0 +1,18 @@
+# Copyright (c) 2025 Codium Electronique
+# All rights reserved.
+
+identifier: cod_nrp_node/nrf9151
+name: COD_NRP_NODE-NRF9151
+type: mcu
+arch: arm
+toolchain:
+  - gnuarmemb
+  - zephyr
+ram: 88
+flash: 1024
+supported:
+  - gpio
+  - spi
+  - watchdog
+  - counter
+vendor: codium
