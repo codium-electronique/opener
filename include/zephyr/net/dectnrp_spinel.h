@@ -9,6 +9,7 @@
  *
  * Property, capability, status and wire values of the DECT NR+ Spinel
  * interface. This header is the single source of truth: host tools mirror it.
+ * The protocol is described in doc/spinel.rst.
  */
 
 #ifndef ZEPHYR_INCLUDE_NET_DECTNRP_SPINEL_H_

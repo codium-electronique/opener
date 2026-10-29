@@ -7,5 +7,6 @@ Welcome to the Opener DECT-2020 NR protocol stack documentation.
    :maxdepth: 2
 
    build/index
+   spinel
    api/index
    samples/index
