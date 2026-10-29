@@ -568,7 +568,7 @@ static void modem_pcc_received(struct nrf91x1_context *ctx, const uint64_t *time
 	} else if (event->header_status == NRF_MODEM_DECT_PHY_HDR_STATUS_INVALID) {
 		LOG_WRN("PHY_EVT_PCC,HDR_STATUS_INVALID,dropped");
 		// TODO Event is completly lost, signalize to upper layer.
-	} else if (event->header_status == NRF_MODEM_DECT_PHY_HDR_STATUS_INVALID) {
+	} else if (event->header_status == NRF_MODEM_DECT_PHY_HDR_STATUS_VALID_RX_END) {
 		LOG_WRN("PHY_EVT_PCC,HDR_STATUS_VALID_RX_END,dropped");
 		// TODO Event is completly lost, signalize to upper layer.
 	} else {
@@ -683,6 +683,12 @@ static void modem_pdc_received(struct nrf91x1_context *ctx, const uint64_t *time
 			ctx->upper_layer_event_handler(ctx->iface, &stack_event);
 		}
 	}
+
+	/* The message is complete: the next PCC belongs to the next message, in the same
+	 * operation when the reception mode is continuous or semi-continuous.
+	 */
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PCC);
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PDC);
 }
 
 /**
@@ -743,6 +749,10 @@ static void modem_pdc_crc_err(struct nrf91x1_context *ctx, const uint64_t *time,
 			ctx->upper_layer_event_handler(ctx->iface, &stack_event);
 		}
 	}
+
+	/* The message is complete, see modem_pdc_received(). */
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PCC);
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PDC);
 }
 
 /**
@@ -767,11 +777,11 @@ static void modem_op_complete_cb(struct nrf91x1_context *ctx, const uint64_t *ti
 
 	struct dectnrp_driver_op *op = (void *)event->handle;
 
-	bool rx = atomic_test_bit(&ctx->rx.state, RADIO_RXSTATE_PDC);
-	if (rx) {
-		atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PCC);
-		atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PDC);
-	}
+	/* A PCC may have been received without its PDC (e.g. the operation ended in between):
+	 * drop it, so that it does not block the next operation.
+	 */
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PCC);
+	atomic_clear_bit(&ctx->rx.state, RADIO_RXSTATE_PDC);
 
 	if (ctx->upper_layer_event_handler) {
 		struct dectnrp_driver_event stack_event = {.code = DECTNRP_EVENT_OP_FINISHED,
