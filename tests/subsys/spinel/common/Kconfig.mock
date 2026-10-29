@@ -1,0 +1,74 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+
+# Mock DECT NR+ driver for the Spinel tests, see mock_driver.h.
+
+config DECTNRP_DRIVER_MOCK
+	bool "Mock DECT NR+ driver"
+	depends on DECTNRP_DRIVER_SCHEDULED_API
+	depends on NETWORKING
+
+if DECTNRP_DRIVER_MOCK
+
+# Radio capabilities: the nRF91x1 driver defaults.
+
+config DECTNRP_DRIVER_RDCAP_DECTNRP_RELEASE
+	int
+	default 1
+
+config DECTNRP_DRIVER_RDCAP_POWERCLASS_MAX
+	int
+	default 2
+
+config DECTNRP_DRIVER_RDCAP_NSS_RX_MAX
+	int
+	default 1
+
+config DECTNRP_DRIVER_RDCAP_RXTX_DIVERSITY_MAX
+	int
+	default 1
+
+config DECTNRP_DRIVER_RDCAP_RXGAIN_DB
+	int
+	default -4
+
+config DECTNRP_DRIVER_RDCAP_MCS_MAX
+	int
+	default 4
+
+config DECTNRP_DRIVER_RDCAP_SOFTBUFFERSIZE_BYTES_MAX
+	int
+	default 25344
+
+config DECTNRP_DRIVER_RDCAP_HARQ_PROC_MAX
+	int
+	default 8
+
+config DECTNRP_DRIVER_RDCAP_HARQ_FEEDBACKDELAY
+	int
+	default 2
+
+config DECTNRP_DRIVER_RDCAP_MU_MAX
+	int
+	default 1
+
+config DECTNRP_DRIVER_RDCAP_BETA_MAX
+	int
+	default 1
+
+config DECTNRP_DRIVER_MODEMTICKS_PER_SYMBOL
+	int
+	default 2880
+
+config DECTNRP_DRIVER_MOCK_AUTO
+	bool "Simulate the radio"
+	help
+	  Run scheduled operations against a simulated radio, for host
+	  integration tests.
+
+config DECTNRP_DRIVER_MOCK_AUTO_EMIT_PERIOD_MS
+	int "Period of the simulated received frames"
+	depends on DECTNRP_DRIVER_MOCK_AUTO
+	default 100
+
+endif # DECTNRP_DRIVER_MOCK
