@@ -378,7 +378,8 @@ static uint32_t parse_op_request(const uint8_t *value, size_t len, struct op_req
 }
 
 /* Copy the TX data into a packet for the driver; NULL if out of packets. */
-static struct net_pkt *alloc_tx_pkt(const uint8_t *data, size_t len)
+/* Copy @p data into a new packet stored in @p out; return a Spinel status. */
+static uint32_t alloc_tx_pkt(const uint8_t *data, size_t len, struct net_pkt **out)
 {
 	struct net_if *iface = spinel_iface();
 	struct net_pkt *pkt;
@@ -386,16 +387,26 @@ static struct net_pkt *alloc_tx_pkt(const uint8_t *data, size_t len)
 
 	pkt = net_pkt_alloc_with_buffer(iface, len, NET_AF_UNSPEC, 0, K_NO_WAIT);
 	if (pkt == NULL) {
-		return NULL;
+		return SPINEL_STATUS_NOMEM;
 	}
 
 	err = net_pkt_write(pkt, data, len);
 	if (err != 0) {
 		net_pkt_unref(pkt);
-		return NULL;
+		return SPINEL_STATUS_NOMEM;
 	}
 
-	return pkt;
+	/* Drivers transmit the first fragment of the packet only. */
+	if (pkt->buffer->frags != NULL) {
+		LOG_WRN("TX data of %zu bytes does not fit in one net_buf "
+			"(CONFIG_NET_BUF_DATA_SIZE)",
+			len);
+		net_pkt_unref(pkt);
+		return SPINEL_STATUS_INVALID_ARGUMENT;
+	}
+
+	*out = pkt;
+	return SPINEL_STATUS_OK;
 }
 
 /* Fill @p slot from @p req and schedule its op; return a Spinel status. */
@@ -407,15 +418,16 @@ static uint32_t slot_schedule(struct spinel_op_slot *slot, const struct op_reque
 	/* Only the RX thread changes the generation of a slot in use. */
 	uint32_t generation = slot->generation;
 	struct net_pkt *pkt;
+	uint32_t status;
 	int err;
 
 	slot->op = req->op;
 
 	if (slot->op.type == DECTNRP_DRIVER_OP_TX) {
-		pkt = alloc_tx_pkt(req->tx_data, req->tx_data_len);
-		if (pkt == NULL) {
+		status = alloc_tx_pkt(req->tx_data, req->tx_data_len, &pkt);
+		if (status != SPINEL_STATUS_OK) {
 			slot_release(slot, generation);
-			return SPINEL_STATUS_NOMEM;
+			return status;
 		}
 		slot->op.tx.pkt = pkt;
 	}

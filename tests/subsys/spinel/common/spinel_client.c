@@ -6,6 +6,7 @@
 #include <errno.h>
 #include <stdarg.h>
 
+#include <zephyr/net/dectnrp.h>
 #include <zephyr/net/dectnrp_spinel.h>
 #include <zephyr/ztest.h>
 
@@ -20,7 +21,8 @@ void send_raw(const uint8_t *frame, size_t len)
 
 void send_req(uint8_t tid, uint32_t cmd, spinel_prop_key_t prop, const char *fmt, ...)
 {
-	uint8_t frame[128];
+	/* Large enough for a TX op with a type 2 PHY header and DECTNRP_MTU of data. */
+	uint8_t frame[64 + DECTNRP_PHY_HEADER_TYPE2_SIZE + DECTNRP_MTU];
 	uint8_t header;
 	spinel_ssize_t header_len;
 	spinel_ssize_t value_len;

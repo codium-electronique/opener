@@ -374,7 +374,9 @@ driver accepted the operation. Otherwise it replies ``LAST_STATUS``:
 * ``ALREADY``: the token is in flight;
 * ``INVALID_ARGUMENT`` or ``PARSE_ERROR``: a bad field, or data shorter than
   the physical header or longer than the physical header plus
-  ``DECTNRP_MTU``;
+  ``DECTNRP_MTU``, or TX data that does not fit in one network buffer (drivers
+  transmit the first buffer of a packet only: set
+  ``CONFIG_NET_BUF_DATA_SIZE`` to at least ``DECTNRP_MTU`` plus 10 bytes);
 * the status of the driver error when ``schedule()`` failed.
 
 Events

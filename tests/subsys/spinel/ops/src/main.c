@@ -293,6 +293,20 @@ ZTEST(spinel_ops, test_insert_tx_too_short)
 	zassert_equal(mock->n_ops, 0);
 }
 
+ZTEST(spinel_ops, test_insert_tx_larger_than_net_buf)
+{
+	struct mock_driver *mock = mock_driver_get();
+	static uint8_t data[CONFIG_NET_BUF_DATA_SIZE + 1];
+
+	/* Drivers transmit the first fragment of the packet only. */
+	memset(data, 0x5A, sizeof(data));
+	memcpy(data, pcc, sizeof(pcc));
+
+	insert_tx(1, 7, 0, data, sizeof(data));
+	expect_status(1, SPINEL_STATUS_INVALID_ARGUMENT);
+	zassert_equal(mock->n_ops, 0);
+}
+
 ZTEST(spinel_ops, test_duplicate_token)
 {
 	insert_rx(1, 7, 0, 0);
