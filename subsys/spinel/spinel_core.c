@@ -470,6 +470,33 @@ static void prop_insert(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data
 	}
 }
 
+/* Deactivate the RX filters, so that a new host receives every frame. */
+static void clear_filters(void)
+{
+	struct dectnrp_config config;
+	int err;
+
+	config.filter_short_network_id.activate = false;
+	config.filter_short_network_id.value = 0;
+	err = drv_configure(DECTNRP_CONFIG_TYPE_FILTER_SHORT_NETWORK_ID, &config);
+	if (err == 0) {
+		drv.nwid_filter = false;
+		drv.nwid = 0;
+	} else {
+		LOG_WRN("cannot clear the short network ID filter (%d)", err);
+	}
+
+	config.filter_short_receiver_addr.activate = false;
+	config.filter_short_receiver_addr.value = 0;
+	err = drv_configure(DECTNRP_CONFIG_TYPE_FILTER_SHORT_RECEIVER_ADDR, &config);
+	if (err == 0) {
+		drv.rxaddr_filter = false;
+		drv.rxaddr = 0;
+	} else {
+		LOG_WRN("cannot clear the short receiver address filter (%d)", err);
+	}
+}
+
 static void cmd_reset(void)
 {
 	k_timeout_t timeout = K_MSEC(CONFIG_DECTNRP_SPINEL_RESET_TIMEOUT_MS);
@@ -483,6 +510,8 @@ static void cmd_reset(void)
 
 	/* The OP_FINISHED events are sent before the reset notification. */
 	(void)spinel_ops_reset(timeout);
+
+	clear_filters();
 
 	spinel_reply_status(0, SPINEL_STATUS_RESET_SOFTWARE);
 }

@@ -225,6 +225,43 @@ ZTEST(spinel_core, test_filters)
 	zassert_equal(rxaddr, 0xBEEF);
 }
 
+ZTEST(spinel_core, test_reset_clears_filters)
+{
+	static const uint8_t reset[] = {SPINEL_HEADER_FLAG | 14, SPINEL_CMD_RESET};
+	struct mock_driver *mock = mock_driver_get();
+	const uint8_t *payload;
+	bool active;
+	uint8_t nwid;
+	uint16_t rxaddr;
+	spinel_ssize_t n;
+	int len;
+
+	send_req(10, SPINEL_CMD_PROP_VALUE_SET, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_NWID, "bC",
+		 true, 0x79);
+	recv_is(10, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_NWID, &payload);
+	send_req(11, SPINEL_CMD_PROP_VALUE_SET, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_RXADDR, "bS",
+		 true, 0xBEEF);
+	recv_is(11, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_RXADDR, &payload);
+
+	send_raw(reset, sizeof(reset));
+	expect_status(0, SPINEL_STATUS_RESET_SOFTWARE);
+
+	zassert_false(mock->nwid_filter);
+	zassert_false(mock->rxaddr_filter);
+
+	send_req(12, SPINEL_CMD_PROP_VALUE_GET, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_NWID, "");
+	len = recv_is(12, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_NWID, &payload);
+	n = spinel_datatype_unpack(payload, len, "bC", &active, &nwid);
+	zassert_true(n > 0);
+	zassert_false(active);
+
+	send_req(13, SPINEL_CMD_PROP_VALUE_GET, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_RXADDR, "");
+	len = recv_is(13, DECTNRP_SPINEL_PROP_DRV_FILTER_SHORT_RXADDR, &payload);
+	n = spinel_datatype_unpack(payload, len, "bS", &active, &rxaddr);
+	zassert_true(n > 0);
+	zassert_false(active);
+}
+
 ZTEST(spinel_core, test_time)
 {
 	struct mock_driver *mock = mock_driver_get();

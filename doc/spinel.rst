@@ -443,6 +443,8 @@ Reset
    operations in flight;
 #. it waits at most ``CONFIG_DECTNRP_SPINEL_RESET_TIMEOUT_MS`` for their
    ``OP_FINISHED`` events, which are sent, then frees all slots;
+#. it deactivates the short network ID and short receiver address filters;
+   the network ID is kept;
 #. it sends ``LAST_STATUS`` = ``RESET_SOFTWARE`` with TID 0.
 
 A reset, or a reboot (``RESET_POWER_ON``), invalidates every token in flight:
