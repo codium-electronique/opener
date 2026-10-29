@@ -1,0 +1,89 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+
+menuconfig DECTNRP_SPINEL
+	bool "DECT NR+ Spinel interface"
+	depends on DECTNRP_DRIVER_SCHEDULED_API
+	depends on NETWORKING
+	select CRC
+	select NET_BUF
+	help
+	  Spinel interface giving a host processor control of the DECT NR+
+	  stack, like the OpenThread radio co-processor (RCP) interface.
+
+if DECTNRP_SPINEL
+
+config DECTNRP_SPINEL_MAX_FRAME_SIZE
+	int "Maximum Spinel frame size"
+	default 1300
+	help
+	  Maximum size in bytes of a Spinel frame, before transport framing.
+	  The default (the Spinel default) fits a DECTNRP_MTU message plus
+	  headers.
+
+config DECTNRP_SPINEL_OP_SLOTS
+	int "Number of in-flight driver operations"
+	default 8
+	help
+	  Number of driver operations the host can have queued at once.
+
+config DECTNRP_SPINEL_EVENT_BUFS
+	int "Number of event buffers"
+	default 16
+	help
+	  Number of driver events that can wait to be sent to the host.
+
+config DECTNRP_SPINEL_TX_BUFS
+	int "Number of frame buffers to the host"
+	default 4
+
+config DECTNRP_SPINEL_RX_BUFS
+	int "Number of frame buffers from the host"
+	default 4
+
+config DECTNRP_SPINEL_THREAD_STACK_SIZE
+	int "Spinel thread stack size"
+	default 2048
+
+config DECTNRP_SPINEL_THREAD_PRIO
+	int "Spinel thread priority"
+	default 5
+
+config DECTNRP_SPINEL_RESET_TIMEOUT_MS
+	int "Reset timeout in milliseconds"
+	default 1000
+	help
+	  Maximum time to wait for the in-flight driver operations to finish
+	  when the host resets the interface.
+
+choice DECTNRP_SPINEL_LEVEL
+	prompt "Spinel control level"
+	default DECTNRP_SPINEL_LEVEL_DRIVER
+
+config DECTNRP_SPINEL_LEVEL_DRIVER
+	bool "Driver"
+	help
+	  Spinel drives the DECT NR+ driver; the L2 runs on the host.
+
+endchoice
+
+choice DECTNRP_SPINEL_TRANSPORT
+	prompt "Spinel transport"
+	default DECTNRP_SPINEL_TRANSPORT_UART
+
+config DECTNRP_SPINEL_TRANSPORT_UART
+	bool "UART with HDLC-lite framing"
+
+config DECTNRP_SPINEL_TRANSPORT_SPI
+	bool "SPI slave with OpenThread Spinel SPI framing"
+
+config DECTNRP_SPINEL_TRANSPORT_NONE
+	bool "None (tests only)"
+
+endchoice
+
+module = DECTNRP_SPINEL
+module-str = DECT NR+ Spinel
+source "subsys/logging/Kconfig.template.log_config"
+
+endif # DECTNRP_SPINEL

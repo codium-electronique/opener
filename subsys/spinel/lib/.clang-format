@@ -1,0 +1,3 @@
+# Vendored OpenThread code: keep it byte-identical to upstream.
+DisableFormat: true
+SortIncludes: Never
