@@ -391,6 +391,25 @@ enum dectnrp_hw_caps {
  */
 struct dectnrp_device_capabilities {
 	enum dectnrp_hw_caps hw_caps;
+	/* Radio latencies, in modem ticks (see DECTNRP_MODEMTICKS_PER_SYMBOL), 0 if unknown. */
+	/** Minimum time between the end of a scheduled operation and the start of the next one. */
+	uint32_t sched_op_transition;
+	/** Additional startup latency of scheduled operations, added to rx_startup or
+	 * tx_startup.
+	 */
+	uint32_t sched_op_startup;
+	/** Idle to RF on, for rx and rssi1 operations. */
+	uint32_t rx_startup;
+	/** RF off to idle, at the end of an rx operation. */
+	uint32_t rx_shutdown;
+	/** RF off to idle, at the end of an rssi1 operation. */
+	uint32_t rssi_shutdown;
+	/** Idle to RF on, for tx operations. */
+	uint32_t tx_startup;
+	/** RF off to idle, at the end of a tx operation. */
+	uint32_t tx_shutdown;
+	/** Stop request to RF off, when an ongoing operation is stopped. */
+	uint32_t stop_to_rf_off;
 };
 
 enum dectnrp_config_type {
@@ -566,7 +585,7 @@ struct dectnrp_driver_api {
 	 *
 	 * @attention The returned modem time is in modem ticks!
 	 *
-	 * @note We use modem time because one tick of it is 1/691200 seconds (~14,46 ns
+	 * @note We use modem time because one tick of it is 1/69120000 seconds (~14,46 ns
 	 * per tick) - modem_time2ns gives rounding errors in that case.
 	 *
 	 * @param dev pointer to DECTNRP driver device
