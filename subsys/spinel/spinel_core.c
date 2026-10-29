@@ -5,7 +5,8 @@
 
 /*
  * Spinel core: RX and TX threads, command dispatch, identity and
- * driver-level properties.
+ * driver-level properties. Driver operations and events are handled by the
+ * op broker (spinel_ops.c).
  */
 
 #include <errno.h>
@@ -36,8 +37,6 @@ LOG_MODULE_REGISTER(dectnrp_spinel, CONFIG_DECTNRP_SPINEL_LOG_LEVEL);
 NET_BUF_POOL_DEFINE(spinel_rx_pool, CONFIG_DECTNRP_SPINEL_RX_BUFS,
 		    CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE, 0, NULL);
 NET_BUF_POOL_DEFINE(spinel_tx_pool, CONFIG_DECTNRP_SPINEL_TX_BUFS,
-		    CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE, 0, NULL);
-NET_BUF_POOL_DEFINE(spinel_evt_pool, CONFIG_DECTNRP_SPINEL_EVENT_BUFS,
 		    CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE, 0, NULL);
 
 static K_FIFO_DEFINE(rx_fifo);
@@ -461,10 +460,10 @@ static void prop_set(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data, s
 
 static void prop_insert(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data, size_t len)
 {
-	ARG_UNUSED(data);
-	ARG_UNUSED(len);
-
 	switch (prop) {
+	case DECTNRP_SPINEL_PROP_DRV_OP_QUEUE:
+		spinel_ops_insert(tid, data, len);
+		break;
 	default:
 		spinel_reply_status(tid, SPINEL_STATUS_PROP_NOT_FOUND);
 		break;
@@ -473,7 +472,18 @@ static void prop_insert(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data
 
 static void cmd_reset(void)
 {
-	(void)set_drv_enabled(false);
+	k_timeout_t timeout = K_MSEC(CONFIG_DECTNRP_SPINEL_RESET_TIMEOUT_MS);
+	int err;
+
+	/* Stopping the driver cancels its operations: each one then finishes. */
+	err = set_drv_enabled(false);
+	if (err != 0) {
+		LOG_WRN("cannot stop the driver (%d)", err);
+	}
+
+	/* The OP_FINISHED events are sent before the reset notification. */
+	(void)spinel_ops_reset(timeout);
+
 	spinel_reply_status(0, SPINEL_STATUS_RESET_SOFTWARE);
 }
 
@@ -578,14 +588,6 @@ static K_THREAD_STACK_DEFINE(tx_stack, CONFIG_DECTNRP_SPINEL_THREAD_STACK_SIZE);
 static struct k_thread rx_thread;
 static struct k_thread tx_thread;
 
-static void drv_event(struct net_if *ev_iface, const struct dectnrp_driver_event *event)
-{
-	ARG_UNUSED(ev_iface);
-	ARG_UNUSED(event);
-
-	/* Events are forwarded to the host once the operation queue exists. */
-}
-
 static void init_ncp_version(void)
 {
 	const struct device *dev = drv_dev();
@@ -610,7 +612,7 @@ static void init_ncp_version(void)
 
 static int spinel_init(void)
 {
-	struct dectnrp_config config = {.event_handler = drv_event};
+	struct dectnrp_config config = {.event_handler = spinel_ops_event_cb};
 	int err;
 
 	iface = net_if_get_first_by_type(&NET_L2_GET_NAME(DECTNRP));

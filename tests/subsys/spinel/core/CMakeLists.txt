@@ -7,8 +7,4 @@ project(spinel_core)
 
 target_sources(app PRIVATE src/main.c)
 include(${CMAKE_CURRENT_LIST_DIR}/../common/CMakeLists.inc)
-# Core internals and the vendored codec are private to the Spinel subsystem.
-target_include_directories(app PRIVATE
-  ${ZEPHYR_OPENER_MODULE_DIR}/subsys/spinel
-  ${ZEPHYR_OPENER_MODULE_DIR}/subsys/spinel/lib
-)
+include(${CMAKE_CURRENT_LIST_DIR}/../common/CMakeLists.client.inc)

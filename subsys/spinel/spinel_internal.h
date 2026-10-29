@@ -15,6 +15,7 @@
 #include <stdint.h>
 
 #include <zephyr/kernel.h>
+#include <zephyr/net/dectnrp_driver.h>
 #include <zephyr/net/net_if.h>
 #include <zephyr/net_buf.h>
 
@@ -77,6 +78,36 @@ uint32_t spinel_status_from_errno(int err);
 /** @return the DECT NR+ network interface driven by Spinel. */
 struct net_if *spinel_iface(void);
 
+/**
+ * @name Driver operation broker
+ *
+ * Driver operations queued by the host each own a slot until the driver
+ * reports them finished.
+ * @{
+ */
+
+/**
+ * Schedule the operation described by a DRV_OP_QUEUE value and reply to the
+ * host: PROP_VALUE_INSERTED with the token on success, LAST_STATUS otherwise.
+ */
+void spinel_ops_insert(uint8_t tid, const uint8_t *value, size_t len);
+
+/** Driver event handler: forwards the event to the host as DRV_EVENT. */
+void spinel_ops_event_cb(struct net_if *iface, const struct dectnrp_driver_event *evt);
+
+/**
+ * Wait until every operation has finished, after the driver was stopped.
+ * Slots still in use after @p timeout are freed anyway.
+ *
+ * @return 0, or -ETIMEDOUT if slots had to be freed.
+ */
+int spinel_ops_reset(k_timeout_t timeout);
+
+/** @return the number of operations in flight. */
+size_t spinel_ops_in_flight(void);
+
+/** @} */
+
 #ifdef CONFIG_DECTNRP_SPINEL_TRANSPORT_NONE
 /**
  * Pop the next frame the core sent (test transport).
@@ -85,6 +116,12 @@ struct net_if *spinel_iface(void);
  *         does not fit in @p size bytes (it is dropped).
  */
 int spinel_test_recv(uint8_t *buf, size_t size, k_timeout_t timeout);
+
+/**
+ * Block or unblock the TX thread (test transport). While blocked, frames
+ * stay queued in the core.
+ */
+void spinel_test_block_tx(bool block);
 #endif
 
 #endif /* DECTNRP_SPINEL_INTERNAL_H_ */

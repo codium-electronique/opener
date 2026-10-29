@@ -22,6 +22,9 @@ struct test_frame {
 
 K_MSGQ_DEFINE(test_frames, sizeof(struct test_frame), 8, 4);
 
+/* Held by the test to block the TX thread in spinel_transport_send(). */
+static K_MUTEX_DEFINE(tx_gate);
+
 int spinel_transport_init(void)
 {
 	return 0;
@@ -30,6 +33,10 @@ int spinel_transport_init(void)
 int spinel_transport_send(const uint8_t *frame, size_t len)
 {
 	static struct test_frame item;
+
+	/* Wait while a test blocks the TX thread. */
+	k_mutex_lock(&tx_gate, K_FOREVER);
+	k_mutex_unlock(&tx_gate);
 
 	if (len > sizeof(item.data)) {
 		return -EMSGSIZE;
@@ -43,8 +50,9 @@ int spinel_transport_send(const uint8_t *frame, size_t len)
 int spinel_test_recv(uint8_t *buf, size_t size, k_timeout_t timeout)
 {
 	static struct test_frame item;
-	int ret = k_msgq_get(&test_frames, &item, timeout);
+	int ret;
 
+	ret = k_msgq_get(&test_frames, &item, timeout);
 	if (ret != 0) {
 		return ret;
 	}
@@ -54,4 +62,19 @@ int spinel_test_recv(uint8_t *buf, size_t size, k_timeout_t timeout)
 	memcpy(buf, item.data, item.len);
 
 	return item.len;
+}
+
+void spinel_test_block_tx(bool block)
+{
+	static bool blocked;
+
+	if (block == blocked) {
+		return;
+	}
+	if (block) {
+		k_mutex_lock(&tx_gate, K_FOREVER);
+	} else {
+		k_mutex_unlock(&tx_gate);
+	}
+	blocked = block;
 }

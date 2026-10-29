@@ -162,7 +162,8 @@ static int mock_schedule(const struct device *dev, struct dectnrp_driver_op *op)
 	}
 
 	op_finished[mock.n_ops] = false;
-	mock.ops[mock.n_ops++] = op;
+	mock.ops[mock.n_ops] = op;
+	mock.n_ops++;
 
 	return 0;
 }
