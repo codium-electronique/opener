@@ -1296,10 +1296,29 @@ static int nrf91x1_schedule(const struct device *dev, struct dectnrp_driver_op *
 	}
 	case DECTNRP_DRIVER_OP_RX: {
 
+		enum nrf_modem_dect_phy_rx_mode rx_mode;
+
+		switch (op->rx.mode.reception) {
+		case DECTNRP_RX_RECEPTION_SINGLE_SHOT:
+			rx_mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT;
+			break;
+		case DECTNRP_RX_RECEPTION_SEMICONTINUOUS:
+			rx_mode = NRF_MODEM_DECT_PHY_RX_MODE_SEMICONTINUOUS;
+			break;
+		case DECTNRP_RX_RECEPTION_CONTINUOUS:
+			rx_mode = NRF_MODEM_DECT_PHY_RX_MODE_CONTINUOUS;
+			break;
+		default:
+			NET_ERR("[%p]nrf91x1_schedule invalid rx reception mode %d", op,
+				op->rx.mode.reception);
+			ret = -EINVAL;
+			goto out;
+		}
+
 		struct nrf_modem_dect_phy_rx_params rx_params = {
 			.handle = (uintptr_t)op,
 			.network_id = ctx->network_id,
-			.mode = NRF_MODEM_DECT_PHY_RX_MODE_SINGLE_SHOT,
+			.mode = rx_mode,
 			.link_id = NRF_MODEM_DECT_PHY_LINK_UNSPECIFIED,
 			.rssi_level = 0, /* fast AGC algorithm */
 			.carrier = op->channel,

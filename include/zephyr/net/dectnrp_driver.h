@@ -80,6 +80,23 @@ struct dectnrp_tx_mode {
 };
 
 /**
+ * @brief Enumerates the reception modes of an RX operation.
+ */
+enum dectnrp_rx_reception {
+	/** The rx operation ends after the first received message. */
+	DECTNRP_RX_RECEPTION_SINGLE_SHOT = 0,
+	/** The rx operation goes on after a received message, and ends after a received
+	 * unicast message.
+	 */
+	DECTNRP_RX_RECEPTION_SEMICONTINUOUS = 1,
+	/** The rx operation goes on after every received message, until its duration elapses.
+	 * @note On nRF91x1 the modem cannot receive physical header type 2 format 0 messages in
+	 * this mode.
+	 */
+	DECTNRP_RX_RECEPTION_CONTINUOUS = 2,
+};
+
+/**
  * @brief Flags related to DECTNRP_DRIVER_OP_RX
  */
 struct dectnrp_rx_mode {
@@ -88,6 +105,8 @@ struct dectnrp_rx_mode {
 	/** The rx operation wants to receive a beacon. The driver may not be interested in this
 	 * field. */
 	uint8_t is_beacon: 1;
+	/** Reception mode, see enum dectnrp_rx_reception. 0 (single shot) is the default. */
+	uint8_t reception: 2;
 };
 
 /**
