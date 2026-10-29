@@ -1,0 +1,16 @@
+/*
+ * Copyright (c) 2026 Codium Electronique
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+/* The host talks Spinel over the second native_sim UART, on its own pty. */
+
+/ {
+	chosen {
+		opener,spinel-uart = &uart1;
+	};
+};
+
+&uart1 {
+	status = "okay";
+};

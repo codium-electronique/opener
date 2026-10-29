@@ -67,12 +67,20 @@ config DECTNRP_SPINEL_LEVEL_DRIVER
 
 endchoice
 
+DT_CHOSEN_SPINEL_UART := opener,spinel-uart
+
 choice DECTNRP_SPINEL_TRANSPORT
 	prompt "Spinel transport"
 	default DECTNRP_SPINEL_TRANSPORT_UART
 
 config DECTNRP_SPINEL_TRANSPORT_UART
 	bool "UART with HDLC-lite framing"
+	depends on $(dt_chosen_enabled,$(DT_CHOSEN_SPINEL_UART))
+	select SERIAL
+	select UART_INTERRUPT_DRIVEN
+	help
+	  Spinel frames in HDLC-lite framing on the UART chosen as
+	  opener,spinel-uart in the devicetree.
 
 config DECTNRP_SPINEL_TRANSPORT_SPI
 	bool "SPI slave with OpenThread Spinel SPI framing"

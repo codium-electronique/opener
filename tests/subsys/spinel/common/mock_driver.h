@@ -9,6 +9,13 @@
  *
  * The mock records what the driver API is asked to do; tests inspect and
  * steer it through struct mock_driver.
+ *
+ * With CONFIG_DECTNRP_DRIVER_MOCK_AUTO, the mock instead runs the scheduled
+ * operations against a simulated radio, for the host integration tests: RX
+ * windows receive a canned frame every
+ * CONFIG_DECTNRP_DRIVER_MOCK_AUTO_EMIT_PERIOD_MS (every tenth one with a PDC
+ * CRC error), TX operations last 1 ms, and RSSI1 operations measure 0x60 on
+ * every subslot. Operations are not recorded in struct mock_driver.
  */
 
 #ifndef DECTNRP_TESTS_SPINEL_MOCK_DRIVER_H_

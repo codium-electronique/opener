@@ -11,6 +11,7 @@ zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_UART hdlc.c)
 zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_LEVEL_DRIVER l2.c)
 
 zephyr_library_sources(spinel_core.c spinel_ops.c)
+zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_UART transport/uart_hdlc.c)
 zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_NONE transport/none.c)
 
 # NCP_VERSION reports the Opener version from the generated build_info.h.
