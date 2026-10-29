@@ -1123,14 +1123,15 @@ static int nrf91x1_stop(const struct device *dev)
 		goto error;
 	}
 
-	ret = nrf_modem_dect_phy_deinit();
+	/* Deactivate only: start() activates again, the PHY stays initialized. */
+	ret = nrf_modem_dect_phy_deactivate();
 	if (ret < 0) {
-		LOG_ERR("Failed to deinit modem, %d", ret);
+		LOG_ERR("Failed to deactivate modem, %d", ret);
 		return -EIO;
 	}
 	ret = k_sem_take(&ctx->modemlock, K_MSEC(100));
 	if (ret < 0) {
-		NET_ERR("nrf_modem_dect_phy_deinit(), k_sem_take failed");
+		NET_ERR("nrf_modem_dect_phy_deactivate(), k_sem_take failed");
 		ret = -EIO;
 		goto error;
 	}
@@ -1227,6 +1228,10 @@ static int nrf91x1_get_time(const struct device *dev, net_time_t *time)
 	ret = k_sem_take(&ctx->modemlock, K_MSEC(10));
 	if (ret < 0) {
 		NET_ERR("nrf91x1_get_time() k_sem_take(modem) failed");
+		ret = -EIO;
+		goto out;
+	}
+	if (ctx->modem.last_status != NRF_MODEM_DECT_PHY_SUCCESS) {
 		ret = -EIO;
 		goto out;
 	}
