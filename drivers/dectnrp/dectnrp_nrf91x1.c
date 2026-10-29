@@ -296,6 +296,7 @@ static void modem_activate_cb(struct nrf91x1_context *ctx, const uint64_t *time,
 	ctx->modem.time = *time;
 	ctx->modem.temperature = event->temp;
 	ctx->modem.voltage = event->voltage;
+	ctx->modem.last_status = event->err;
 	k_sem_give(&ctx->modemlock);
 }
 
@@ -317,6 +318,7 @@ static void modem_deactivate_cb(struct nrf91x1_context *ctx, const uint64_t *tim
 		LOG_ERR("<%lld> PHY_EVT_DEACTIVATE failed,0x%x", *time, event->err);
 	}
 	ctx->modem.time = *time;
+	ctx->modem.last_status = event->err;
 	k_sem_give(&ctx->modemlock);
 }
 
@@ -1058,6 +1060,39 @@ static void log_fw_uuid(void)
 	}
 }
 
+static const struct nrf_modem_dect_phy_config_params phy_config_params = {
+	.band_group_index = CONFIG_DECTNRP_DRIVER_NRF91X1_BAND_GROUP,
+	.harq_rx_process_count = 1,        /* TODO make it more flexible */
+	.harq_rx_expiry_time_us = 5000000, /* TODO make it more flexible */
+};
+
+/**
+ * @brief Configure the DECT PHY and wait for the result.
+ *
+ * The PHY must be deactivated, and must be configured before each activation
+ * (nrf_modem_dect_phy_activate()).
+ */
+static int modem_configure(struct nrf91x1_context *ctx)
+{
+	int ret;
+
+	ret = nrf_modem_dect_phy_configure(&phy_config_params);
+	if (ret < 0) {
+		NET_ERR("nrf_modem_dect_phy_configure failed,0x%x", ret);
+		return -EIO;
+	}
+	ret = k_sem_take(&ctx->modemlock, K_MSEC(500));
+	if (ret < 0) {
+		NET_ERR("nrf_modem_dect_phy_configure(), k_sem_take failed");
+		return -EIO;
+	}
+	if (ctx->modem.last_status != NRF_MODEM_DECT_PHY_SUCCESS) {
+		NET_ERR("nrf_modem_dect_phy_configure failed,0x%x", ctx->modem.last_status);
+		return -EIO;
+	}
+	return 0;
+}
+
 static int nrf91x1_start(const struct device *dev)
 {
 	int ret = 0;
@@ -1072,6 +1107,10 @@ static int nrf91x1_start(const struct device *dev)
 		ret = -EALREADY;
 		goto error;
 	} else {
+		ret = modem_configure(ctx);
+		if (ret < 0) {
+			goto error;
+		}
 		ret = nrf_modem_dect_phy_activate(NRF91X1_RADIO_MODE);
 		if (ret < 0) {
 			NET_ERR("nrf_modem_dect_phy_activate failed,%d", ret);
@@ -1081,6 +1120,10 @@ static int nrf91x1_start(const struct device *dev)
 		ret = k_sem_take(&ctx->modemlock, K_MSEC(100));
 		if (ret < 0) {
 			NET_ERR("nrf_modem_dect_phy_activate(), k_sem_take failed");
+			ret = -EIO;
+			goto error;
+		}
+		if (ctx->modem.last_status != NRF_MODEM_DECT_PHY_SUCCESS) {
 			ret = -EIO;
 			goto error;
 		}
@@ -1123,7 +1166,9 @@ static int nrf91x1_stop(const struct device *dev)
 		goto error;
 	}
 
-	/* Deactivate only: start() activates again, the PHY stays initialized. */
+	/* Deactivate only: start() configures and activates again, the PHY stays
+	 * initialized.
+	 */
 	ret = nrf_modem_dect_phy_deactivate();
 	if (ret < 0) {
 		LOG_ERR("Failed to deactivate modem, %d", ret);
@@ -1132,6 +1177,10 @@ static int nrf91x1_stop(const struct device *dev)
 	ret = k_sem_take(&ctx->modemlock, K_MSEC(100));
 	if (ret < 0) {
 		NET_ERR("nrf_modem_dect_phy_deactivate(), k_sem_take failed");
+		ret = -EIO;
+		goto error;
+	}
+	if (ctx->modem.last_status != NRF_MODEM_DECT_PHY_SUCCESS) {
 		ret = -EIO;
 		goto error;
 	}
@@ -1541,25 +1590,8 @@ static int nrf91x1_init(const struct device *dev)
 			goto error;
 		}
 
-		static const struct nrf_modem_dect_phy_config_params init_params = {
-			.band_group_index = CONFIG_DECTNRP_DRIVER_NRF91X1_BAND_GROUP,
-			.harq_rx_process_count = 1,        /* TODO make it more flexible */
-			.harq_rx_expiry_time_us = 5000000, /* TODO make it more flexible */
-		};
-		ret = nrf_modem_dect_phy_configure(&init_params);
+		ret = modem_configure(ctx);
 		if (ret < 0) {
-			NET_ERR("nrf_modem_dect_phy_init failed,0x%x", ret);
-			ret = -EIO;
-			goto error;
-		}
-		ret = k_sem_take(&ctx->modemlock, K_MSEC(500));
-		if (ret < 0) {
-			NET_ERR("nrf_modem_dect_phy_configure(), k_sem_take failed");
-			ret = -EIO;
-			goto error;
-		} else if (ctx->modem.last_status != NRF_MODEM_DECT_PHY_SUCCESS) {
-			NET_ERR("nrf_modem_dect_phy_configure failed,0x%x", ctx->modem.last_status);
-			ret = -EIO;
 			goto error;
 		}
 
