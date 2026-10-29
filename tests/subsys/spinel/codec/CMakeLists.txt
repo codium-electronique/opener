@@ -8,3 +8,4 @@ project(spinel_codec)
 target_sources(app PRIVATE src/main.c)
 # The vendored codec header is private to the Spinel subsystem.
 target_include_directories(app PRIVATE ${ZEPHYR_OPENER_MODULE_DIR}/subsys/spinel/lib)
+include(${CMAKE_CURRENT_LIST_DIR}/../common/CMakeLists.inc)

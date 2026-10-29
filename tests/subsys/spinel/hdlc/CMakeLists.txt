@@ -8,3 +8,4 @@ project(spinel_hdlc)
 # HDLC-lite is only built for the UART transport: compile it into the test.
 target_sources(app PRIVATE src/main.c ${ZEPHYR_OPENER_MODULE_DIR}/subsys/spinel/hdlc.c)
 target_include_directories(app PRIVATE ${ZEPHYR_OPENER_MODULE_DIR}/subsys/spinel)
+include(${CMAKE_CURRENT_LIST_DIR}/../common/CMakeLists.inc)
