@@ -60,13 +60,15 @@ ZTEST(spinel_hdlc, test_encode_escapes)
 	zassert_mem_equal(enc, expected, sizeof(expected));
 
 	/* One byte short of the encoded length. */
-	zassert_equal(spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(expected) - 1), 0);
+	len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(expected) - 1);
+	zassert_equal(len, 0);
 }
 
 ZTEST(spinel_hdlc, test_roundtrip_all_bytes)
 {
 	uint8_t frame[256];
 	size_t len;
+	int ret;
 
 	for (size_t i = 0; i < sizeof(frame); i++) {
 		frame[i] = i;
@@ -76,20 +78,28 @@ ZTEST(spinel_hdlc, test_roundtrip_all_bytes)
 	zassert_true(len > sizeof(frame) + 4);
 	zassert_true(len <= SPINEL_HDLC_MAX_ENCODED(sizeof(frame)));
 
-	zassert_equal(feed(enc, len), sizeof(frame));
+	ret = feed(enc, len);
+	zassert_equal(ret, sizeof(frame));
 	zassert_mem_equal(dec_buf, frame, sizeof(frame));
 }
 
 ZTEST(spinel_hdlc, test_bad_fcs)
 {
 	static const uint8_t frame[] = {0x80, 0x02, 0x01, 0x02, 0x03};
-	size_t len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(enc));
+	size_t len;
+	int ret;
 
-	enc[3] ^= 0x01;
-	zassert_equal(feed(enc, len), -EBADMSG);
+	len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(enc));
 
+	/* Corrupt one payload byte. */
 	enc[3] ^= 0x01;
-	zassert_equal(feed(enc, len), sizeof(frame));
+	ret = feed(enc, len);
+	zassert_equal(ret, -EBADMSG);
+
+	/* Restore it: the same frame now decodes. */
+	enc[3] ^= 0x01;
+	ret = feed(enc, len);
+	zassert_equal(ret, sizeof(frame));
 	zassert_mem_equal(dec_buf, frame, sizeof(frame));
 }
 
@@ -97,12 +107,18 @@ ZTEST(spinel_hdlc, test_garbage_then_frame)
 {
 	static const uint8_t garbage[] = {0x00, 0x13, 0xA5, 0x7D, 0xFF, 0x42, 0x11, 0x5E, 0xF8};
 	static const uint8_t frame[] = {0x81, 0x03, 0x00};
-	size_t len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(enc));
+	size_t len;
+	int ret;
 
-	zassert_equal(feed(garbage, sizeof(garbage)), 0);
+	len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(enc));
+
+	ret = feed(garbage, sizeof(garbage));
+	zassert_equal(ret, 0);
 	/* The frame's leading flag closes the garbage, which is dropped as a bad frame. */
-	zassert_equal(spinel_hdlc_decode_byte(&dec, enc[0]), -EBADMSG);
-	zassert_equal(feed(&enc[1], len - 1), sizeof(frame));
+	ret = spinel_hdlc_decode_byte(&dec, enc[0]);
+	zassert_equal(ret, -EBADMSG);
+	ret = feed(&enc[1], len - 1);
+	zassert_equal(ret, sizeof(frame));
 	zassert_mem_equal(dec_buf, frame, sizeof(frame));
 }
 
@@ -112,21 +128,24 @@ ZTEST(spinel_hdlc, test_overflow_resync)
 	static const uint8_t frame[] = {0x80, 0x01, 0x00};
 	size_t len;
 	int errors = 0;
+	int ret;
 
 	memset(big, 0x55, sizeof(big));
 	len = spinel_hdlc_encode(big, sizeof(big), enc, sizeof(enc));
 	zassert_true(len > 0);
 
 	for (size_t i = 0; i < len; i++) {
-		int ret = spinel_hdlc_decode_byte(&dec, enc[i]);
-
+		ret = spinel_hdlc_decode_byte(&dec, enc[i]);
 		zassert_true(ret == 0 || ret == -EMSGSIZE, "unexpected %d", ret);
-		errors += (ret == -EMSGSIZE);
+		if (ret == -EMSGSIZE) {
+			errors++;
+		}
 	}
 	zassert_equal(errors, 1);
 
 	len = spinel_hdlc_encode(frame, sizeof(frame), enc, sizeof(enc));
-	zassert_equal(feed(enc, len), sizeof(frame));
+	ret = feed(enc, len);
+	zassert_equal(ret, sizeof(frame));
 	zassert_mem_equal(dec_buf, frame, sizeof(frame));
 }
 
@@ -134,7 +153,10 @@ ZTEST(spinel_hdlc, test_empty_frames_ignored)
 {
 	static const uint8_t flags[] = {0x7E, 0x7E, 0x7E};
 
-	zassert_equal(feed(flags, sizeof(flags)), 0);
+	int ret;
+
+	ret = feed(flags, sizeof(flags));
+	zassert_equal(ret, 0);
 }
 
 ZTEST_SUITE(spinel_hdlc, NULL, NULL, before, NULL, NULL);

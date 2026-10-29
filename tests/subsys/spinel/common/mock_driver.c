@@ -141,7 +141,11 @@ static int mock_get_time(const struct device *dev, net_time_t *time)
 {
 	ARG_UNUSED(dev);
 
-	*time = mock.time != 0 ? mock.time : k_uptime_get() * MOCK_TICKS_PER_MS;
+	if (mock.time != 0) {
+		*time = mock.time;
+	} else {
+		*time = k_uptime_get() * MOCK_TICKS_PER_MS;
+	}
 
 	return 0;
 }

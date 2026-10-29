@@ -13,14 +13,11 @@
 static struct dectnrp_driver_op ops[3];
 static int finished;
 
-static const struct dectnrp_driver_api *api(void)
-{
-	return net_if_get_device(mock_driver_iface())->api;
-}
-
 static void count_finished(struct net_if *iface, const struct dectnrp_driver_event *evt)
 {
-	zassert_equal(iface, mock_driver_iface());
+	struct net_if *mock_iface = mock_driver_iface();
+
+	zassert_equal(iface, mock_iface);
 	if (evt->code == DECTNRP_EVENT_OP_FINISHED) {
 		finished++;
 	}
@@ -35,41 +32,59 @@ static void before(void *fixture)
 
 ZTEST(spinel_mock, test_iface_found)
 {
-	zassert_not_null(mock_driver_iface());
-	zassert_equal(net_if_get_first_by_type(&NET_L2_GET_NAME(DECTNRP)), mock_driver_iface());
+	struct net_if *mock_iface = mock_driver_iface();
+	struct net_if *dectnrp_iface;
+
+	zassert_not_null(mock_iface);
+	dectnrp_iface = net_if_get_first_by_type(&NET_L2_GET_NAME(DECTNRP));
+	zassert_equal(dectnrp_iface, mock_iface);
 }
 
 ZTEST(spinel_mock, test_schedule_records)
 {
+	struct mock_driver *mock = mock_driver_get();
 	const struct device *dev = net_if_get_device(mock_driver_iface());
+	const struct dectnrp_driver_api *api = dev->api;
+	int ret;
 
 	ops[0].type = DECTNRP_DRIVER_OP_RX;
-	zassert_ok(api()->schedule(dev, &ops[0]));
-	zassert_equal(mock_driver_get()->n_ops, 1);
-	zassert_equal_ptr(mock_driver_get()->ops[0], &ops[0]);
+	ret = api->schedule(dev, &ops[0]);
+	zassert_ok(ret);
+	zassert_equal(mock->n_ops, 1);
+	zassert_equal_ptr(mock->ops[0], &ops[0]);
 
-	mock_driver_get()->schedule_ret = -EBUSY;
-	zassert_equal(api()->schedule(dev, &ops[1]), -EBUSY);
-	zassert_equal(mock_driver_get()->n_ops, 1);
+	/* A rejected op is not recorded. */
+	mock->schedule_ret = -EBUSY;
+	ret = api->schedule(dev, &ops[1]);
+	zassert_equal(ret, -EBUSY);
+	zassert_equal(mock->n_ops, 1);
 }
 
 ZTEST(spinel_mock, test_stop_finishes_ops)
 {
+	struct mock_driver *mock = mock_driver_get();
 	const struct device *dev = net_if_get_device(mock_driver_iface());
+	const struct dectnrp_driver_api *api = dev->api;
 	struct dectnrp_config cfg = {.event_handler = count_finished};
+	int ret;
 
-	zassert_ok(api()->configure(dev, DECTNRP_CONFIG_TYPE_EVENT_HANDLER, &cfg));
-	zassert_ok(api()->start(dev));
+	ret = api->configure(dev, DECTNRP_CONFIG_TYPE_EVENT_HANDLER, &cfg);
+	zassert_ok(ret);
+	ret = api->start(dev);
+	zassert_ok(ret);
 	for (size_t i = 0; i < ARRAY_SIZE(ops); i++) {
-		zassert_ok(api()->schedule(dev, &ops[i]));
+		ret = api->schedule(dev, &ops[i]);
+		zassert_ok(ret);
 	}
 
-	zassert_ok(api()->stop(dev));
+	ret = api->stop(dev);
+	zassert_ok(ret);
 	zassert_equal(finished, ARRAY_SIZE(ops));
-	zassert_equal(mock_driver_get()->stop_calls, 1);
+	zassert_equal(mock->stop_calls, 1);
 
 	/* Finished ops are not reported twice. */
-	zassert_ok(api()->stop(dev));
+	ret = api->stop(dev);
+	zassert_ok(ret);
 	zassert_equal(finished, ARRAY_SIZE(ops));
 }
 
