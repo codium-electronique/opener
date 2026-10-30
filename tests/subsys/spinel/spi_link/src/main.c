@@ -52,7 +52,7 @@ ZTEST(spinel_spi_link, test_arm_header)
 	static const uint8_t header[] = {0x02, 0x14, 0x05, 0x07, 0x00};
 
 	link.reset_pending = false;
-	size_t armed = spinel_spi_link_arm(&link, frame, 7, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, frame, 7, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, 12);
 	zassert_mem_equal(tx_buf, header, sizeof(header));
@@ -62,7 +62,7 @@ ZTEST(spinel_spi_link, test_arm_header)
 
 ZTEST(spinel_spi_link, test_arm_reset_flag)
 {
-	size_t armed = spinel_spi_link_arm(&link, NULL, 0, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, NULL, 0, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, SPINEL_SPI_HEADER_LEN);
 	zassert_equal(tx_buf[0], 0x82);
@@ -70,7 +70,7 @@ ZTEST(spinel_spi_link, test_arm_reset_flag)
 	complete_with(host_empty, sizeof(host_empty), SPINEL_SPI_HEADER_LEN);
 	zassert_false(link.reset_pending);
 
-	armed = spinel_spi_link_arm(&link, NULL, 0, tx_buf, sizeof(tx_buf));
+	armed = spinel_spi_link_arm(&link, NULL, 0, true, tx_buf, sizeof(tx_buf));
 	zassert_equal(armed, SPINEL_SPI_HEADER_LEN);
 	zassert_equal(tx_buf[0], 0x02);
 }
@@ -80,7 +80,7 @@ ZTEST(spinel_spi_link, test_arm_empty)
 	static const uint8_t header[] = {0x02, 0x14, 0x05, 0x00, 0x00};
 
 	link.reset_pending = false;
-	size_t armed = spinel_spi_link_arm(&link, NULL, 0, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, NULL, 0, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, SPINEL_SPI_HEADER_LEN);
 	zassert_mem_equal(tx_buf, header, sizeof(header));
@@ -89,7 +89,7 @@ ZTEST(spinel_spi_link, test_arm_empty)
 
 ZTEST(spinel_spi_link, test_arm_too_small)
 {
-	size_t armed = spinel_spi_link_arm(&link, frame, 7, tx_buf, 8);
+	size_t armed = spinel_spi_link_arm(&link, frame, 7, true, tx_buf, 8);
 
 	zassert_equal(armed, 0);
 }
@@ -108,14 +108,14 @@ ZTEST(spinel_spi_link, test_complete_rx_frame)
 
 ZTEST(spinel_spi_link, test_complete_sent)
 {
-	size_t armed = spinel_spi_link_arm(&link, frame, 7, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, frame, 7, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, 12);
 	complete_with(host_empty, sizeof(host_empty), 12);
 	zassert_true(res.sent);
 	zassert_equal(res.err, 0);
 
-	armed = spinel_spi_link_arm(&link, frame, 7, tx_buf, sizeof(tx_buf));
+	armed = spinel_spi_link_arm(&link, frame, 7, true, tx_buf, sizeof(tx_buf));
 	zassert_equal(armed, 12);
 	complete_with(host_empty, sizeof(host_empty), CLOCK_LEN);
 	zassert_true(res.sent);
@@ -123,7 +123,7 @@ ZTEST(spinel_spi_link, test_complete_sent)
 
 ZTEST(spinel_spi_link, test_complete_short_clock_not_sent)
 {
-	size_t armed = spinel_spi_link_arm(&link, frame, LONG_LEN, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, frame, LONG_LEN, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, SPINEL_SPI_HEADER_LEN + LONG_LEN);
 	complete_with(host_empty, sizeof(host_empty), SPINEL_SPI_HEADER_LEN + CLOCK_LEN);
@@ -169,6 +169,29 @@ ZTEST(spinel_spi_link, test_complete_too_long)
 	zassert_equal(res.rx_len, 0);
 }
 
+ZTEST(spinel_spi_link, test_arm_no_room)
+{
+	static const uint8_t host[] = {0x02, 0x00, 0x01, 0x03, 0x00, 0xAA, 0xBB, 0xCC};
+	size_t armed = spinel_spi_link_arm(&link, NULL, 0, false, tx_buf, sizeof(tx_buf));
+
+	zassert_equal(armed, SPINEL_SPI_HEADER_LEN);
+	zassert_equal(tx_buf[1], 0x00);
+	zassert_equal(tx_buf[2], 0x00);
+
+	/* Not received, and not an error: the host sends it again. */
+	complete_with(host, sizeof(host), sizeof(host));
+	zassert_equal(res.err, 0);
+	zassert_equal(res.rx_len, 0);
+
+	armed = spinel_spi_link_arm(&link, NULL, 0, true, tx_buf, sizeof(tx_buf));
+	zassert_equal(armed, SPINEL_SPI_HEADER_LEN);
+	zassert_equal(tx_buf[1], 0x14);
+	zassert_equal(tx_buf[2], 0x05);
+	complete_with(host, sizeof(host), sizeof(host));
+	zassert_equal(res.err, 0);
+	zassert_equal(res.rx_len, 3);
+}
+
 ZTEST(spinel_spi_link, test_complete_truncated)
 {
 	static const uint8_t host[] = {0x02, 0x00, 0x01, 0x0A, 0x00};
@@ -181,7 +204,7 @@ ZTEST(spinel_spi_link, test_complete_truncated)
 
 ZTEST(spinel_spi_link, test_complete_no_header)
 {
-	size_t armed = spinel_spi_link_arm(&link, frame, 7, tx_buf, sizeof(tx_buf));
+	size_t armed = spinel_spi_link_arm(&link, frame, 7, true, tx_buf, sizeof(tx_buf));
 
 	zassert_equal(armed, 12);
 	complete_with(host_empty, sizeof(host_empty), 3);

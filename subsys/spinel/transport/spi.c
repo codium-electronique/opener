@@ -12,6 +12,9 @@
  * time, with the frame of spinel_transport_send() or none, and sets IRQ
  * before it releases BUSY: a host that waits for BUSY inactive reads a
  * current IRQ. The transaction callback sets BUSY again.
+ *
+ * A host frame is received only into a buffer reserved before arming: with
+ * none free, the header advertises RECV_LEN 0 and the host sends it again.
  */
 
 #include <errno.h>
@@ -22,6 +25,7 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
+#include <zephyr/net_buf.h>
 #include <zephyr/sys/atomic.h>
 
 #include "spi_link.h"
@@ -44,6 +48,8 @@ static const struct gpio_dt_spec busy_gpio = GPIO_DT_SPEC_GET(SPINEL_SPI_NODE, b
 static struct spinel_spi_link link;
 static uint8_t tx_buf[SPINEL_SPI_BUF_SIZE];
 static uint8_t rx_buf[SPINEL_SPI_BUF_SIZE];
+/* Core buffer for the next host frame, NULL if none was free. */
+static struct net_buf *rx_reserved;
 
 /* Received length of the last transaction, or a negative errno. */
 static int xfer_result;
@@ -91,12 +97,17 @@ static uint32_t arm(void)
 	seq = pending_seq;
 	k_spin_unlock(&pending_lock, key);
 
+	if (rx_reserved == NULL) {
+		rx_reserved = spinel_rx_buf_alloc();
+	}
+	bool rx_room = rx_reserved != NULL;
+
 	/* The frame is copied: spinel_transport_send() can return from now on. */
-	total = spinel_spi_link_arm(&link, frame, len, tx_buf, sizeof(tx_buf));
+	total = spinel_spi_link_arm(&link, frame, len, rx_room, tx_buf, sizeof(tx_buf));
 	if (total == 0) {
 		LOG_ERR("frame of %zu bytes too long for SPI", len);
 		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
-		total = spinel_spi_link_arm(&link, NULL, 0, tx_buf, sizeof(tx_buf));
+		total = spinel_spi_link_arm(&link, NULL, 0, rx_room, tx_buf, sizeof(tx_buf));
 	}
 
 	const struct spi_buf tx = {.buf = tx_buf, .len = total};
@@ -176,7 +187,12 @@ static void complete(uint32_t seq)
 		frame_done(seq);
 	}
 	if (res.rx_len > 0) {
-		spinel_rx_submit(res.rx_frame, res.rx_len);
+		/* The link received a frame only if arm() advertised room. */
+		struct net_buf *buf = rx_reserved;
+
+		rx_reserved = NULL;
+		net_buf_add_mem(buf, res.rx_frame, res.rx_len);
+		spinel_rx_buf_submit(buf);
 	}
 	if (res.err != 0) {
 		spinel_stat_inc(SPINEL_STAT_FRAMES_REJECTED);

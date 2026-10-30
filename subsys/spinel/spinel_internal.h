@@ -43,6 +43,15 @@ int spinel_transport_send(const uint8_t *frame, size_t len);
  */
 void spinel_rx_submit(const uint8_t *frame, size_t len);
 
+/**
+ * Take a buffer for one frame from the host, for a transport that receives
+ * into it directly. @return the buffer, or NULL if none is free.
+ */
+struct net_buf *spinel_rx_buf_alloc(void);
+
+/** Hand a frame received in a buffer of spinel_rx_buf_alloc() to the core. */
+void spinel_rx_buf_submit(struct net_buf *buf);
+
 /** @} */
 
 /** Interface counters, in DRV_STATS field order. */

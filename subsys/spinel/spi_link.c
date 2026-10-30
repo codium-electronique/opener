@@ -18,11 +18,12 @@ void spinel_spi_link_init(struct spinel_spi_link *link, uint16_t recv_len)
 {
 	link->reset_pending = true;
 	link->recv_len = recv_len;
+	link->armed_recv_len = recv_len;
 	link->armed_len = 0;
 }
 
 size_t spinel_spi_link_arm(struct spinel_spi_link *link, const uint8_t *frame, size_t len,
-			   uint8_t *tx_buf, size_t tx_size)
+			   bool rx_room, uint8_t *tx_buf, size_t tx_size)
 {
 	size_t total = SPINEL_SPI_HEADER_LEN + len;
 
@@ -36,13 +37,20 @@ size_t spinel_spi_link_arm(struct spinel_spi_link *link, const uint8_t *frame, s
 		hdr |= SPINEL_SPI_FLAG_RST;
 	}
 
+	uint16_t recv_len = 0;
+
+	if (rx_room) {
+		recv_len = link->recv_len;
+	}
+
 	tx_buf[HDR_OFFSET] = hdr;
-	sys_put_le16(link->recv_len, &tx_buf[RECV_LEN_OFFSET]);
+	sys_put_le16(recv_len, &tx_buf[RECV_LEN_OFFSET]);
 	sys_put_le16((uint16_t)len, &tx_buf[DATA_LEN_OFFSET]);
 	if (len > 0) {
 		memcpy(&tx_buf[SPINEL_SPI_HEADER_LEN], frame, len);
 	}
 	link->armed_len = len;
+	link->armed_recv_len = recv_len;
 
 	return total;
 }
@@ -64,6 +72,10 @@ static int parse_host_frame(const struct spinel_spi_link *link, const uint8_t *r
 
 	if (len > link->recv_len) {
 		return -EMSGSIZE;
+	}
+	if (len > link->armed_recv_len) {
+		/* No room advertised: the host sends the frame again. */
+		len = 0;
 	}
 	if (SPINEL_SPI_HEADER_LEN + len > clocked) {
 		return -EBADMSG;

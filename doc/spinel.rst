@@ -151,12 +151,17 @@ A host transaction:
 #. If the device's ``RECV_LEN`` was shorter than the host's frame, the frame
    was not received: send it again in a later transaction.
 
-The device advertises ``RECV_LEN`` = ``CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE``.
+The device advertises ``RECV_LEN`` = ``CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE``,
+or 0 while all its ``CONFIG_DECTNRP_SPINEL_RX_BUFS`` receive buffers are in
+use: the host then sends its frame again.
 A frame that no host clocks within ``CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS``
 (default 1000) is counted as a transport error, and the device moves on to
 the next frame. The frame already armed in the SPI slave stays there until a
 host clocks it: a host that connects late first receives that frame, often
-the boot notification. Frames queued while no host clocks are dropped.
+the boot notification. Frames queued while no host clocks are dropped. A host
+that sends ``CMD_NOOP`` right after ``CMD_RESET`` knows that the reset
+notification of its reset is the last one before the ``NOOP`` reply, as the
+device handles frames in order.
 
 The ``opener,spinel-spi`` node is a child of the SPI slave controller:
 

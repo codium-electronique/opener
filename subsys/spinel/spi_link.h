@@ -47,8 +47,10 @@
 struct spinel_spi_link {
 	/** No transaction of at least a header since init: set RST. */
 	bool reset_pending;
-	/** RECV_LEN advertised in the headers: the largest frame accepted from the host. */
+	/** Largest frame accepted from the host. */
 	uint16_t recv_len;
+	/** RECV_LEN of the armed header: @ref recv_len, or 0 when there is no room. */
+	uint16_t armed_recv_len;
 	/** Length of the frame in the armed buffer, 0 for none. */
 	size_t armed_len;
 };
@@ -81,13 +83,15 @@ void spinel_spi_link_init(struct spinel_spi_link *link, uint16_t recv_len);
  * @param link Link state.
  * @param frame Frame to send, NULL if @p len is 0.
  * @param len Length of @p frame, 0 for none.
+ * @param rx_room Whether a host frame can be received: if not, RECV_LEN is 0 and a host frame
+ *        is not received, without error, for the host to send it again.
  * @param tx_buf Transmit buffer.
  * @param tx_size Size of @p tx_buf.
  *
  * @return Number of bytes to arm (header and frame), or 0 if @p tx_buf is too small.
  */
 size_t spinel_spi_link_arm(struct spinel_spi_link *link, const uint8_t *frame, size_t len,
-			   uint8_t *tx_buf, size_t tx_size);
+			   bool rx_room, uint8_t *tx_buf, size_t tx_size);
 
 /**
  * @brief Process a finished transaction.

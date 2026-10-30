@@ -163,6 +163,16 @@ int spinel_reply_status(uint8_t tid, uint32_t status)
 			    SPINEL_DATATYPE_UINT_PACKED_S, status);
 }
 
+struct net_buf *spinel_rx_buf_alloc(void)
+{
+	return net_buf_alloc(&spinel_rx_pool, K_NO_WAIT);
+}
+
+void spinel_rx_buf_submit(struct net_buf *buf)
+{
+	k_fifo_put(&rx_fifo, buf);
+}
+
 void spinel_rx_submit(const uint8_t *frame, size_t len)
 {
 	struct net_buf *buf;
@@ -172,13 +182,13 @@ void spinel_rx_submit(const uint8_t *frame, size_t len)
 		return;
 	}
 
-	buf = net_buf_alloc(&spinel_rx_pool, K_NO_WAIT);
+	buf = spinel_rx_buf_alloc();
 	if (buf == NULL) {
 		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
 		return;
 	}
 	net_buf_add_mem(buf, frame, len);
-	k_fifo_put(&rx_fifo, buf);
+	spinel_rx_buf_submit(buf);
 }
 
 static void reply_drv_enabled(uint8_t tid)
