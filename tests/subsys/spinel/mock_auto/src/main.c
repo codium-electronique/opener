@@ -49,7 +49,8 @@ static void before(void *fixture)
 /* Run a continuous RX window from @p start to @p end, in modem ticks. */
 static void run_window(int64_t start, int64_t end)
 {
-	const struct device *dev = net_if_get_device(mock_driver_iface());
+	struct net_if *iface = mock_driver_iface();
+	const struct device *dev = net_if_get_device(iface);
 	const struct dectnrp_driver_api *api = dev->api;
 	struct dectnrp_config cfg = {.event_handler = on_event};
 	int ret;
