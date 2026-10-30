@@ -26,9 +26,10 @@ The interface needs a DECT NR+ driver with the scheduled API
    CONFIG_NETWORKING=y
    CONFIG_DECTNRP_DRIVER_SCHEDULED_API=y
    CONFIG_DECTNRP_SPINEL=y
-   CONFIG_DECTNRP_SPINEL_TRANSPORT_UART=y
 
-and a UART chosen in the devicetree:
+and a transport in the devicetree: an ``opener,spinel-spi`` node selects the
+SPI transport (see `SPI`_), else a UART chosen as ``opener,spinel-uart``
+selects the UART transport:
 
 .. code-block:: devicetree
 
@@ -76,7 +77,7 @@ Main options:
      - Time ``CMD_RESET`` waits for the in-flight operations.
 
 The ``dectnrp-spinel`` sample of opener-samples is a ready-made firmware for
-the nRF9151 DK and the nRF9131 EK.
+the nRF9151 DK and the nRF9131 EK (UART), and for the Codium NR+Gate (SPI).
 
 Transport
 *********
@@ -106,6 +107,78 @@ Notes for hosts:
   once. Frames received while all are in use are dropped without a reply and
   counted as transport errors. Hosts keep at most that many requests waiting
   for a reply.
+
+SPI
+===
+
+The device is the SPI slave (mode 0, MSB first) and uses the Spinel SPI
+framing of OpenThread, without HDLC. Every transaction starts with a 5-byte
+header in both directions, followed by the raw Spinel frame:
+
+.. code-block:: none
+
+   HDR (u8) | RECV_LEN (u16 LE) | DATA_LEN (u16 LE) | frame
+
+* ``HDR`` holds the flags RST (``0x80``), CRC (``0x40``) and CCF (``0x20``)
+  and the pattern ``0b10`` in bits 1..0. CRC is not supported: a header with
+  the CRC flag, or without the pattern, is invalid.
+* ``RECV_LEN`` is the largest frame the sender accepts in this transaction,
+  ``DATA_LEN`` the length of the frame it sends, 0 for none.
+* A frame is sent only if the transaction clocked all its ``5 + DATA_LEN``
+  bytes. A received frame is accepted if ``DATA_LEN`` is at most the
+  receiver's ``RECV_LEN`` and the transaction clocked it whole.
+* The device sets RST in its headers from boot until the first transaction
+  of at least 5 bytes.
+
+Two lines from the device complete the bus:
+
+* IRQ, active high: the device has a frame for the host. This is the
+  opposite polarity of OpenThread's interrupt line.
+* BUSY, active high, an extension to the OpenThread specification: the
+  device is not ready for a transaction. The device goes busy at the end of
+  each transaction and is ready again once it has armed the next one. It
+  updates IRQ before it releases BUSY, so a host reads IRQ only while BUSY
+  is inactive.
+
+A host transaction:
+
+#. Wait until BUSY is inactive.
+#. Clock a transaction when IRQ is active or the host has a frame to send:
+   the header and its frame, padded to ``5 + 128`` bytes or more.
+#. If the device's ``DATA_LEN`` is longer than the bytes clocked, wait until
+   BUSY is inactive and clock a second transaction of ``5 + DATA_LEN`` bytes
+   to receive the whole frame.
+#. If the device's ``RECV_LEN`` was shorter than the host's frame, the frame
+   was not received: send it again in a later transaction.
+
+The device advertises ``RECV_LEN`` = ``CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE``.
+A frame that no host clocks within ``CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS``
+(default 1000) is counted as a transport error, and the device moves on to
+the next frame. The frame already armed in the SPI slave stays there until a
+host clocks it: a host that connects late first receives that frame, often
+the boot notification. Frames queued while no host clocks are dropped.
+
+The ``opener,spinel-spi`` node is a child of the SPI slave controller:
+
+.. code-block:: devicetree
+
+   &spi2 {
+           compatible = "nordic,nrf-spis";
+           def-char = <0xff>;
+
+           spinel@0 {
+                   compatible = "opener,spinel-spi";
+                   reg = <0>;
+                   spi-max-frequency = <8000000>;
+                   irq-gpios = <&gpio0 9 GPIO_ACTIVE_HIGH>;
+                   busy-gpios = <&gpio0 26 GPIO_ACTIVE_HIGH>;
+           };
+   };
+
+Set the controller's default character (``def-char`` on nRF) to ``0xff``: a
+transaction clocked while the device is not armed then reads an invalid
+header, which the host drops. The slave uses the controller's own chip
+select pin, not a CS GPIO.
 
 Frames
 ******

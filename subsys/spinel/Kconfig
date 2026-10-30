@@ -71,6 +71,7 @@ DT_CHOSEN_SPINEL_UART := opener,spinel-uart
 
 choice DECTNRP_SPINEL_TRANSPORT
 	prompt "Spinel transport"
+	default DECTNRP_SPINEL_TRANSPORT_SPI if DT_HAS_OPENER_SPINEL_SPI_ENABLED
 	default DECTNRP_SPINEL_TRANSPORT_UART
 
 config DECTNRP_SPINEL_TRANSPORT_UART
@@ -84,11 +85,35 @@ config DECTNRP_SPINEL_TRANSPORT_UART
 
 config DECTNRP_SPINEL_TRANSPORT_SPI
 	bool "SPI slave with OpenThread Spinel SPI framing"
+	depends on DT_HAS_OPENER_SPINEL_SPI_ENABLED
+	select SPI
+	select SPI_SLAVE
+	select SPI_ASYNC
+	select GPIO
+	help
+	  Spinel frames in the Spinel SPI framing, the device being the SPI
+	  slave of the first opener,spinel-spi devicetree node, with IRQ and
+	  BUSY lines to the host.
 
 config DECTNRP_SPINEL_TRANSPORT_NONE
 	bool "None (tests only)"
 
 endchoice
+
+if DECTNRP_SPINEL_TRANSPORT_SPI
+
+config DECTNRP_SPINEL_SPI_STACK_SIZE
+	int "SPI transport thread stack size"
+	default 1024
+
+config DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS
+	int "SPI frame timeout in milliseconds"
+	default 1000
+	help
+	  Time a frame to the host waits for the host to clock it. A frame
+	  still waiting after it is dropped and counted as a transport error.
+
+endif # DECTNRP_SPINEL_TRANSPORT_SPI
 
 module = DECTNRP_SPINEL
 module-str = DECT NR+ Spinel

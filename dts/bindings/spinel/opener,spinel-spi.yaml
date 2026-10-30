@@ -1,0 +1,25 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Spinel interface over SPI, the device being the SPI slave
+  (CONFIG_DECTNRP_SPINEL_TRANSPORT_SPI). The node is a child of the SPI slave
+  controller. IRQ is active while the device has a frame for the host; BUSY
+  is active while the device is not ready for a transaction. Set the
+  controller's def-char to 0xff, so that a transaction clocked while the
+  device is not ready reads an invalid header.
+
+compatible: "opener,spinel-spi"
+
+include: spi-device.yaml
+
+properties:
+  irq-gpios:
+    type: phandle-array
+    required: true
+    description: Output to the host, active while a frame waits to be clocked.
+
+  busy-gpios:
+    type: phandle-array
+    required: true
+    description: Output to the host, active while the SPI slave is not armed.
