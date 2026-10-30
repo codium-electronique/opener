@@ -28,6 +28,7 @@
 #include <zephyr/net_buf.h>
 #include <zephyr/sys/atomic.h>
 
+#include "spi_handoff.h"
 #include "spi_link.h"
 #include "spinel_internal.h"
 
@@ -57,18 +58,22 @@ static atomic_t thread_events;
 static K_SEM_DEFINE(thread_wake, 0, 1);
 
 /*
- * Frame of spinel_transport_send(), NULL for none. pending_seq numbers the
- * frames, so that a transaction finishing after its sender timed out does
- * not complete the next sender's frame.
+ * Hand-off of the frame of spinel_transport_send() to this thread. Arming copies the frame
+ * and completing it give the sender its result, both under the hand-off's lock, so that a
+ * sender that returned is never read, and a transaction finishing after its sender timed out
+ * does not complete the next sender's frame (the frames are numbered).
  */
-static struct k_spinlock pending_lock;
-static const uint8_t *pending_frame;
-static size_t pending_len;
-static uint32_t pending_seq;
-static K_SEM_DEFINE(frame_sent, 0, 1);
+static struct spinel_spi_handoff handoff;
 
 static K_THREAD_STACK_DEFINE(spi_stack, CONFIG_DECTNRP_SPINEL_SPI_STACK_SIZE);
 static struct k_thread spi_thread;
+
+/* Wake the SPI thread for a new frame. */
+static void wake_thread(void)
+{
+	atomic_set_bit(&thread_events, EVENT_FRAME_NEW);
+	k_sem_give(&thread_wake);
+}
 
 static void xfer_cb(const struct device *dev, int result, void *data)
 {
@@ -85,29 +90,21 @@ static void xfer_cb(const struct device *dev, int result, void *data)
 /* Arm the pending frame, or none. @return sequence number of the armed frame. */
 static uint32_t arm(void)
 {
-	const uint8_t *frame;
-	size_t len;
 	uint32_t seq;
 	size_t total;
-	k_spinlock_key_t key;
-
-	key = k_spin_lock(&pending_lock);
-	frame = pending_frame;
-	len = pending_len;
-	seq = pending_seq;
-	k_spin_unlock(&pending_lock, key);
+	int ret;
 
 	if (rx_reserved == NULL) {
 		rx_reserved = spinel_rx_buf_alloc();
 	}
 	bool rx_room = rx_reserved != NULL;
 
-	/* The frame is copied: spinel_transport_send() can return from now on. */
-	total = spinel_spi_link_arm(&link, frame, len, rx_room, tx_buf, sizeof(tx_buf));
-	if (total == 0) {
-		LOG_ERR("frame of %zu bytes too long for SPI", len);
+	/* The frame is copied under the lock: its sender can return from now on. */
+	ret = spinel_spi_handoff_arm(&handoff, &link, rx_room, tx_buf, sizeof(tx_buf), &total,
+				     &seq);
+	if (ret == -EMSGSIZE) {
+		LOG_ERR("frame too long for SPI");
 		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
-		total = spinel_spi_link_arm(&link, NULL, 0, rx_room, tx_buf, sizeof(tx_buf));
 	}
 
 	const struct spi_buf tx = {.buf = tx_buf, .len = total};
@@ -152,24 +149,6 @@ static void wait_xfer(void)
 	}
 }
 
-static void frame_done(uint32_t seq)
-{
-	k_spinlock_key_t key;
-	bool wake = false;
-
-	key = k_spin_lock(&pending_lock);
-	if (pending_frame != NULL && pending_seq == seq) {
-		pending_frame = NULL;
-		pending_len = 0;
-		wake = true;
-	}
-	k_spin_unlock(&pending_lock, key);
-
-	if (wake) {
-		k_sem_give(&frame_sent);
-	}
-}
-
 static void complete(uint32_t seq)
 {
 	struct spinel_spi_result res;
@@ -184,7 +163,7 @@ static void complete(uint32_t seq)
 
 	spinel_spi_link_complete(&link, rx_buf, clocked, &res);
 	if (res.sent) {
-		frame_done(seq);
+		spinel_spi_handoff_done(&handoff, seq);
 	}
 	if (res.rx_len > 0) {
 		/* The link received a frame only if arm() advertised room. */
@@ -243,6 +222,7 @@ int spinel_transport_init(void)
 		return err;
 	}
 
+	spinel_spi_handoff_init(&handoff, wake_thread);
 	spinel_spi_link_init(&link, CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE);
 
 	k_thread_create(&spi_thread, spi_stack, K_THREAD_STACK_SIZEOF(spi_stack), spi_thread_fn,
@@ -254,39 +234,13 @@ int spinel_transport_init(void)
 
 int spinel_transport_send(const uint8_t *frame, size_t len)
 {
-	k_spinlock_key_t key;
-	bool dropped = false;
 	int ret;
 
-	k_sem_reset(&frame_sent);
-
-	key = k_spin_lock(&pending_lock);
-	pending_frame = frame;
-	pending_len = len;
-	pending_seq++;
-	k_spin_unlock(&pending_lock, key);
-
-	atomic_set_bit(&thread_events, EVENT_FRAME_NEW);
-	k_sem_give(&thread_wake);
-
-	ret = k_sem_take(&frame_sent, K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS));
-	if (ret == 0) {
-		return 0;
+	ret = spinel_spi_handoff_send(&handoff, frame, len,
+				      K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS));
+	if (ret == -ETIMEDOUT) {
+		LOG_WRN("no host clocked a frame of %zu bytes, dropped", len);
 	}
 
-	key = k_spin_lock(&pending_lock);
-	if (pending_frame == frame) {
-		pending_frame = NULL;
-		pending_len = 0;
-		dropped = true;
-	}
-	k_spin_unlock(&pending_lock, key);
-
-	if (!dropped) {
-		/* Sent between the timeout and the lock. */
-		return 0;
-	}
-
-	LOG_WRN("no host clocked a frame of %zu bytes, dropped", len);
-	return -ETIMEDOUT;
+	return ret;
 }
