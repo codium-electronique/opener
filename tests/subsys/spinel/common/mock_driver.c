@@ -86,9 +86,9 @@ struct auto_op {
 	struct k_work_delayable work;
 	/* Operation being simulated, NULL when the entry is free. */
 	struct dectnrp_driver_op *op;
-	/* Uptime in ms when the operation starts and ends. */
-	int64_t start_ms;
-	int64_t end_ms;
+	/* Modem time in ticks when the operation starts and ends. */
+	int64_t start_ticks;
+	int64_t end_ticks;
 	/* Uptime in ms of the next frame on air an RX window can receive. */
 	int64_t next_frame_ms;
 };
@@ -115,23 +115,31 @@ static bool auto_is_scheduled(const struct dectnrp_driver_op *op)
 	}
 }
 
-static int64_t auto_duration_ms(const struct dectnrp_driver_op *op)
+static int64_t auto_duration_ticks(const struct dectnrp_driver_op *op)
 {
 	switch (op->type) {
 	case DECTNRP_DRIVER_OP_TX:
-		return AUTO_TX_DURATION_MS;
+		return AUTO_TX_DURATION_MS * MOCK_TICKS_PER_MS;
 	case DECTNRP_DRIVER_OP_RX:
-		return op->rx.duration / MOCK_TICKS_PER_MS;
+		return op->rx.duration;
 	default:
 		return 0;
 	}
 }
 
-/* @return the uptime in ms of the first frame on air at or after @p ms. */
-static int64_t auto_next_frame(int64_t ms)
+/* @return @p ticks in ms, rounded up. */
+static int64_t auto_ticks_to_ms_ceil(int64_t ticks)
 {
+	return (ticks + MOCK_TICKS_PER_MS - 1) / MOCK_TICKS_PER_MS;
+}
+
+/* @return the uptime in ms of the first frame on air at or after @p ticks. */
+static int64_t auto_next_frame(int64_t ticks)
+{
+	int64_t ms;
 	int64_t periods;
 
+	ms = auto_ticks_to_ms_ceil(ticks);
 	periods = (ms + AUTO_EMIT_PERIOD_MS - 1) / AUTO_EMIT_PERIOD_MS;
 
 	return periods * AUTO_EMIT_PERIOD_MS;
@@ -228,11 +236,14 @@ static void auto_step(struct auto_op *a, int64_t now)
 	bool is_rx;
 	bool frame_due;
 	bool single_shot;
+	int64_t frame_ticks;
+	int64_t end_ms;
 	int64_t wake_ms;
 
 	is_rx = op->type == DECTNRP_DRIVER_OP_RX;
 	if (is_rx) {
-		frame_due = now >= a->next_frame_ms && a->next_frame_ms < a->end_ms;
+		frame_ticks = a->next_frame_ms * MOCK_TICKS_PER_MS;
+		frame_due = now >= a->next_frame_ms && frame_ticks < a->end_ticks;
 		if (frame_due) {
 			auto_emit_frame(a, a->next_frame_ms);
 			a->next_frame_ms += AUTO_EMIT_PERIOD_MS;
@@ -246,7 +257,8 @@ static void auto_step(struct auto_op *a, int64_t now)
 		}
 	}
 
-	if (now >= a->end_ms) {
+	end_ms = auto_ticks_to_ms_ceil(a->end_ticks);
+	if (now >= end_ms) {
 		if (op->type == DECTNRP_DRIVER_OP_RSSI1) {
 			auto_emit_rssi1(a);
 		}
@@ -254,7 +266,7 @@ static void auto_step(struct auto_op *a, int64_t now)
 		return;
 	}
 
-	wake_ms = a->end_ms;
+	wake_ms = end_ms;
 	if (is_rx && a->next_frame_ms < wake_ms) {
 		wake_ms = a->next_frame_ms;
 	}
@@ -291,11 +303,12 @@ static int auto_schedule(struct dectnrp_driver_op *op)
 	struct auto_op *a;
 	int64_t now;
 	bool scheduled;
-	int64_t duration_ms;
+	int64_t duration_ticks;
+	int64_t start_ms;
 
 	now = k_uptime_get();
 	scheduled = auto_is_scheduled(op);
-	duration_ms = auto_duration_ms(op);
+	duration_ticks = auto_duration_ticks(op);
 
 	k_mutex_lock(&auto_lock, K_FOREVER);
 	a = auto_alloc();
@@ -306,13 +319,14 @@ static int auto_schedule(struct dectnrp_driver_op *op)
 
 	a->op = op;
 	if (scheduled) {
-		a->start_ms = op->start_time / MOCK_TICKS_PER_MS;
+		a->start_ticks = op->start_time;
 	} else {
-		a->start_ms = now;
+		a->start_ticks = now * MOCK_TICKS_PER_MS;
 	}
-	a->end_ms = a->start_ms + duration_ms;
-	a->next_frame_ms = auto_next_frame(a->start_ms);
-	(void)k_work_reschedule(&a->work, K_TIMEOUT_ABS_MS(a->start_ms));
+	a->end_ticks = a->start_ticks + duration_ticks;
+	a->next_frame_ms = auto_next_frame(a->start_ticks);
+	start_ms = a->start_ticks / MOCK_TICKS_PER_MS;
+	(void)k_work_reschedule(&a->work, K_TIMEOUT_ABS_MS(start_ms));
 	k_mutex_unlock(&auto_lock);
 
 	return 0;
