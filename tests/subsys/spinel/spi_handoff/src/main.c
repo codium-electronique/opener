@@ -33,6 +33,8 @@ static bool done_result;
 static bool copy_ok;
 static const uint8_t *expected_frame;
 static size_t expected_len;
+static uint32_t stale_seq;
+static bool stale_done;
 
 static void wake_hook(void)
 {
@@ -63,6 +65,12 @@ static void arm_check_and_done(void)
 	done_result = spinel_spi_handoff_done(&handoff, armed_seq);
 }
 
+/* Completes an earlier frame once the next one is pending, as a late transaction would. */
+static void done_stale(void)
+{
+	stale_done = spinel_spi_handoff_done(&handoff, stale_seq);
+}
+
 static void before(void *fixture)
 {
 	ARG_UNUSED(fixture);
@@ -71,6 +79,8 @@ static void before(void *fixture)
 	armed_total = 0;
 	done_result = false;
 	copy_ok = false;
+	stale_seq = 0;
+	stale_done = false;
 	memset(tx_buf, 0, sizeof(tx_buf));
 	spinel_spi_link_init(&link, RECV_LEN);
 	spinel_spi_handoff_init(&handoff, wake_hook);
@@ -128,6 +138,25 @@ ZTEST(spinel_spi_handoff, test_late_done_does_not_complete_next)
 
 	wake_action = NULL;
 	ret = spinel_spi_handoff_send(&handoff, frame, sizeof(frame), K_MSEC(5));
+	zassert_equal(ret, -ETIMEDOUT);
+}
+
+ZTEST(spinel_spi_handoff, test_stale_done_while_next_pending)
+{
+	static const uint8_t frame_a[] = {9, 8, 7};
+	static const uint8_t frame_b[] = {6, 5, 4};
+	int ret;
+
+	/* Frame A is armed, then its sender times out. */
+	wake_action = arm_now;
+	ret = spinel_spi_handoff_send(&handoff, frame_a, sizeof(frame_a), K_MSEC(5));
+	zassert_equal(ret, -ETIMEDOUT);
+	stale_seq = armed_seq;
+
+	/* The transaction of A completes while B is pending: B must stay pending. */
+	wake_action = done_stale;
+	ret = spinel_spi_handoff_send(&handoff, frame_b, sizeof(frame_b), K_MSEC(5));
+	zassert_false(stale_done, "the completion of A completed B");
 	zassert_equal(ret, -ETIMEDOUT);
 }
 
