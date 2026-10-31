@@ -22,4 +22,7 @@ properties:
   busy-gpios:
     type: phandle-array
     required: true
-    description: Output to the host, active while the SPI slave is not armed.
+    description: |
+      Output to the host, active while the SPI slave is not armed. It is also
+      held after a host frame until the reply is armed, at most
+      CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US.

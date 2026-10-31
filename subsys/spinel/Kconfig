@@ -126,6 +126,17 @@ config DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS
 	  buffers do not run out when no host is clocking. The offered frame
 	  stays until a host clocks it.
 
+config DECTNRP_SPINEL_SPI_REPLY_WAIT_US
+	int "SPI reply wait in microseconds"
+	default 2000
+	range 0 5000
+	help
+	  Time BUSY stays active after a host frame while no frame is
+	  waiting for the host, so that a reply produced within it is armed
+	  for the host's next transaction and needs no arming transaction of
+	  its own. If no frame comes within it, the device is armed empty and
+	  BUSY is released. 0 arms at once, without waiting.
+
 endif # DECTNRP_SPINEL_TRANSPORT_SPI
 
 module = DECTNRP_SPINEL

@@ -54,6 +54,13 @@ static const uint8_t reset_power_on[] = {0x80, 0x06, 0x00, 0x70};
 static const uint8_t noop[] = {0x81, 0x00};
 static const uint8_t status_ok_tid1[] = {0x81, 0x06, 0x00, 0x00};
 static const uint8_t status_1[] = {0x80, 0x06, 0x00, 0x01};
+/* PROTOCOL_VERSION GET, TID 1 and 2, and the replies. */
+static const uint8_t get_protocol_version[] = {0x81, 0x02, 0x01};
+static const uint8_t get_protocol_version_tid2[] = {0x82, 0x02, 0x01};
+static const uint8_t protocol_version_is[] = {0x81, 0x06, 0x01, 0x04, 0x03};
+static const uint8_t protocol_version_is_tid2[] = {0x82, 0x06, 0x01, 0x04, 0x03};
+/* Rejected: not a request, no reply. */
+static const uint8_t not_a_request[] = {0x01, 0x01};
 
 static bool busy(void)
 {
@@ -361,6 +368,133 @@ ZTEST(spi_transport, test_frames_behind_unclocked_frame_dropped)
 	uint32_t dropped = transport_errors() - errors;
 
 	zassert_equal(dropped, 2);
+}
+
+ZTEST(spi_transport, test_reply_in_next_transaction)
+{
+	uint8_t miso[XFER_LEN];
+
+	int sent = host_xfer(get_protocol_version, sizeof(get_protocol_version), miso);
+
+	zassert_equal(sent, 0);
+
+	bool ready = wait_ready();
+
+	zassert_true(ready, "BUSY stays high");
+	zassert_true(irq());
+
+	int len = host_xfer(NULL, 0, miso);
+
+	zassert_equal(len, sizeof(protocol_version_is));
+	zassert_mem_equal(&miso[SPI_HEADER_LEN], protocol_version_is, sizeof(protocol_version_is));
+}
+
+ZTEST(spi_transport, test_request_rides_on_reply_transaction)
+{
+	uint8_t miso[XFER_LEN];
+
+	int first = host_xfer(noop, sizeof(noop), miso);
+
+	zassert_equal(first, 0);
+
+	int second = host_xfer(get_protocol_version_tid2, sizeof(get_protocol_version_tid2), miso);
+
+	zassert_equal(second, sizeof(status_ok_tid1));
+	zassert_mem_equal(&miso[SPI_HEADER_LEN], status_ok_tid1, sizeof(status_ok_tid1));
+
+	int third = host_xfer(NULL, 0, miso);
+
+	zassert_equal(third, sizeof(protocol_version_is_tid2));
+	zassert_mem_equal(&miso[SPI_HEADER_LEN], protocol_version_is_tid2,
+			  sizeof(protocol_version_is_tid2));
+}
+
+ZTEST(spi_transport, test_hold_bounded_without_reply)
+{
+	uint8_t miso[XFER_LEN];
+	uint8_t frame[HOST_RECV_LEN];
+	int64_t start = k_uptime_ticks();
+
+	int sent = host_xfer(not_a_request, sizeof(not_a_request), miso);
+
+	zassert_equal(sent, 0);
+
+	bool ready = wait_ready();
+
+	zassert_true(ready, "BUSY stays high");
+
+	int64_t held_us = k_ticks_to_us_floor64(k_uptime_ticks() - start);
+
+	zassert_true(held_us >= 2000, "held %lld us", held_us);
+	zassert_false(irq());
+
+	/* A late frame still arrives. */
+	spinel_reply_status(0, 4);
+
+	int len = recv_frame(frame);
+
+	zassert_equal(len, 4);
+	zassert_equal(frame[3], 4);
+}
+
+ZTEST(spi_transport, test_queued_frame_armed_without_hold)
+{
+	uint8_t miso[XFER_LEN];
+	uint8_t frame[HOST_RECV_LEN];
+
+	spinel_reply_status(0, 5);
+
+	bool pending = wait_irq();
+
+	zassert_true(pending, "no IRQ");
+
+	int64_t start = k_uptime_ticks();
+	/* The arming transaction carries the request. */
+	int arming = host_xfer(noop, sizeof(noop), miso);
+
+	zassert_equal(arming, 0);
+
+	bool ready = wait_ready();
+
+	zassert_true(ready, "BUSY stays high");
+
+	int64_t held_us = k_ticks_to_us_floor64(k_uptime_ticks() - start);
+
+	zassert_true(held_us < 1000, "held %lld us", held_us);
+
+	int queued = host_xfer(NULL, 0, miso);
+
+	zassert_equal(queued, 4);
+	/* The queued frame first. */
+	zassert_equal(miso[SPI_HEADER_LEN + 3], 5);
+
+	int len = recv_frame(frame);
+
+	zassert_equal(len, sizeof(status_ok_tid1));
+	/* Then the reply. */
+	zassert_mem_equal(frame, status_ok_tid1, sizeof(status_ok_tid1));
+}
+
+ZTEST(spi_transport, test_transaction_during_hold_ignored)
+{
+	uint8_t miso[XFER_LEN];
+	uint8_t mosi[XFER_LEN] = {0x02, HOST_RECV_LEN};
+
+	int sent = host_xfer(not_a_request, sizeof(not_a_request), miso);
+
+	zassert_equal(sent, 0);
+	/* Inside the 2 ms hold. */
+	k_sleep(K_USEC(500));
+	zassert_true(busy());
+
+	int ret = fake_spis_clock(spis, mosi, miso, XFER_LEN);
+
+	zassert_equal(ret, -EAGAIN);
+	zassert_equal(miso[0], 0xff);
+
+	int idle = host_xfer(NULL, 0, miso);
+
+	zassert_equal(idle, 0);
 }
 
 ZTEST_SUITE(spi_transport, NULL, suite_setup, before, NULL, NULL);

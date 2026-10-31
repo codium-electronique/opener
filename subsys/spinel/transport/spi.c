@@ -12,9 +12,15 @@
  * (spinel_tx_done()). It arms one transaction at a time, with the frame in
  * armed_buf or none. While armed empty and a frame is queued, it takes that
  * frame as next_buf and raises IRQ: the host's transaction shows no frame,
- * then next_buf is armed. A frame is armed only before IRQ is raised for it
- * (set before BUSY is released: a host that waits for BUSY inactive reads a
- * current IRQ), and the transaction callback sets BUSY again.
+ * then next_buf is armed. arm() sets IRQ before it releases BUSY, so a host
+ * that waits for BUSY inactive reads a current IRQ, and the transaction
+ * callback sets BUSY again.
+ *
+ * After a host frame, BUSY is held until the reply is armed, at most
+ * CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US: the reply then comes in the host's
+ * next transaction, not after an arming one. The hold is skipped when a frame
+ * is already offered or queued. A transaction clocked during the hold finds
+ * the SPI slave not armed and is ignored.
  *
  * With a frame offered (armed, or taken as next_buf) and no transaction for
  * CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS, the frames queued behind it are
@@ -198,7 +204,8 @@ static void wait_xfer(void)
 	}
 }
 
-static void complete(void)
+/* Returns true if the transaction delivered a host frame. */
+static bool complete(void)
 {
 	struct spinel_spi_result res;
 	int clocked = xfer_result;
@@ -207,7 +214,7 @@ static void complete(void)
 		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
 		/* Do not spin on a failing SPI slave. */
 		k_sleep(K_MSEC(10));
-		return;
+		return false;
 	}
 
 	spinel_spi_link_complete(&link, rx_buf, clocked, &res);
@@ -226,6 +233,25 @@ static void complete(void)
 	if (res.err != 0) {
 		spinel_stat_inc(SPINEL_STAT_FRAMES_REJECTED);
 	}
+
+	return res.rx_len > 0;
+}
+
+/*
+ * After a host frame, wait for its reply while BUSY is still active, so that arm() arms it.
+ * Nothing to wait for if a frame is already offered or queued: spinel_tx_get() then returns
+ * at once, and arm() takes the unsent armed_buf or next_buf first.
+ */
+static void hold_for_reply(void)
+{
+	if (CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US == 0) {
+		return;
+	}
+	if (armed_buf != NULL || next_buf != NULL) {
+		return;
+	}
+
+	next_buf = spinel_tx_get(K_USEC(CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US));
 }
 
 static void spi_thread_fn(void *p1, void *p2, void *p3)
@@ -237,7 +263,11 @@ static void spi_thread_fn(void *p1, void *p2, void *p3)
 	while (true) {
 		arm();
 		wait_xfer();
-		complete();
+		bool host_frame = complete();
+
+		if (host_frame) {
+			hold_for_reply();
+		}
 	}
 }
 
