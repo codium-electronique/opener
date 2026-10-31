@@ -1,8 +1,0 @@
-# Copyright (c) 2026 Codium Electronique
-# SPDX-License-Identifier: Apache-2.0
-
-tests:
-  opener.spinel.spi_handoff:
-    platform_allow: native_sim/native/64
-    integration_platforms:
-      - native_sim/native/64

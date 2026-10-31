@@ -4,9 +4,9 @@
  */
 
 /*
- * Spinel core: RX and TX threads, command dispatch, identity and
- * driver-level properties. Driver operations and events are handled by the
- * op broker (spinel_ops.c).
+ * Spinel core: RX thread, TX thread (unless the transport pulls its frames from the TX queue),
+ * command dispatch, identity and driver-level properties. Driver operations and events are handled
+ * by the op broker (spinel_ops.c).
  */
 
 #include <errno.h>
@@ -118,6 +118,25 @@ int spinel_send_frame(struct net_buf *buf)
 	k_fifo_put(&tx_fifo, buf);
 
 	return 0;
+}
+
+struct net_buf *spinel_tx_get(k_timeout_t timeout)
+{
+	return k_fifo_get(&tx_fifo, timeout);
+}
+
+void spinel_tx_poll_init(struct k_poll_event *event)
+{
+	k_poll_event_init(event, K_POLL_TYPE_FIFO_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
+			  &tx_fifo);
+}
+
+void spinel_tx_done(struct net_buf *buf, int err)
+{
+	if (err != 0) {
+		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
+	}
+	net_buf_unref(buf);
 }
 
 int spinel_reply(uint8_t tid, uint32_t cmd, spinel_prop_key_t prop, const char *fmt, ...)
@@ -603,6 +622,7 @@ static void rx_thread_fn(void *p1, void *p2, void *p3)
 	}
 }
 
+#ifndef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 static void tx_thread_fn(void *p1, void *p2, void *p3)
 {
 	ARG_UNUSED(p1);
@@ -613,19 +633,19 @@ static void tx_thread_fn(void *p1, void *p2, void *p3)
 	int err;
 
 	while (true) {
-		buf = k_fifo_get(&tx_fifo, K_FOREVER);
+		buf = spinel_tx_get(K_FOREVER);
 		err = spinel_transport_send(buf->data, buf->len);
-		if (err != 0) {
-			spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
-		}
-		net_buf_unref(buf);
+		spinel_tx_done(buf, err);
 	}
 }
+#endif
 
 static K_THREAD_STACK_DEFINE(rx_stack, CONFIG_DECTNRP_SPINEL_THREAD_STACK_SIZE);
-static K_THREAD_STACK_DEFINE(tx_stack, CONFIG_DECTNRP_SPINEL_THREAD_STACK_SIZE);
 static struct k_thread rx_thread;
+#ifndef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
+static K_THREAD_STACK_DEFINE(tx_stack, CONFIG_DECTNRP_SPINEL_THREAD_STACK_SIZE);
 static struct k_thread tx_thread;
+#endif
 
 static void init_ncp_version(void)
 {
@@ -678,9 +698,11 @@ static int spinel_init(void)
 	k_thread_create(&rx_thread, rx_stack, K_THREAD_STACK_SIZEOF(rx_stack), rx_thread_fn, NULL,
 			NULL, NULL, CONFIG_DECTNRP_SPINEL_THREAD_PRIO, 0, K_NO_WAIT);
 	k_thread_name_set(&rx_thread, "spinel_rx");
+#ifndef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 	k_thread_create(&tx_thread, tx_stack, K_THREAD_STACK_SIZEOF(tx_stack), tx_thread_fn, NULL,
 			NULL, NULL, CONFIG_DECTNRP_SPINEL_THREAD_PRIO, 0, K_NO_WAIT);
 	k_thread_name_set(&tx_thread, "spinel_tx");
+#endif
 
 	spinel_reply(0, SPINEL_CMD_PROP_VALUE_IS, SPINEL_PROP_LAST_STATUS,
 		     SPINEL_DATATYPE_UINT_PACKED_S, SPINEL_STATUS_RESET_POWER_ON);

@@ -90,6 +90,8 @@ config DECTNRP_SPINEL_TRANSPORT_SPI
 	select SPI_SLAVE
 	select SPI_ASYNC
 	select GPIO
+	select POLL
+	select DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 	help
 	  Spinel frames in the Spinel SPI framing, the device being the SPI
 	  slave of the first opener,spinel-spi devicetree node, with IRQ and
@@ -99,6 +101,13 @@ config DECTNRP_SPINEL_TRANSPORT_NONE
 	bool "None (tests only)"
 
 endchoice
+
+config DECTNRP_SPINEL_TRANSPORT_PULLS_TX
+	bool
+	help
+	  The transport takes frames from the core's TX queue itself
+	  (spinel_tx_get()), so the core starts no TX thread and the
+	  transport has no spinel_transport_send().
 
 if DECTNRP_SPINEL_TRANSPORT_SPI
 
@@ -110,8 +119,12 @@ config DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS
 	int "SPI frame timeout in milliseconds"
 	default 1000
 	help
-	  Time a frame to the host waits for the host to clock it. A frame
-	  still waiting after it is dropped and counted as a transport error.
+	  Time a frame to the host can wait for the host to clock a
+	  transaction. Each time it passes with a frame offered (armed, or
+	  taken for the next arm) and no transaction, the frames queued behind
+	  it are dropped and counted as transport errors, so that the TX
+	  buffers do not run out when no host is clocking. The offered frame
+	  stays until a host clocks it.
 
 endif # DECTNRP_SPINEL_TRANSPORT_SPI
 

@@ -31,11 +31,35 @@
 /** Initialize the transport, before the core threads start. */
 int spinel_transport_init(void);
 
+#ifndef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 /**
  * Send one Spinel frame to the host, blocking until it is handed to the
- * hardware. Called from the TX thread only.
+ * hardware. Called from the TX thread only. A transport that takes its
+ * frames itself (CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX) has none: the
+ * core starts no TX thread.
  */
 int spinel_transport_send(const uint8_t *frame, size_t len);
+#endif
+
+/**
+ * Take the next frame the core queued for the host, for a transport that
+ * pulls its frames. The transport owns the buffer until spinel_tx_done().
+ *
+ * @return the frame, or NULL on timeout.
+ */
+struct net_buf *spinel_tx_get(k_timeout_t timeout);
+
+/**
+ * Initialize @p event to wait, with k_poll(), for a frame in the TX queue.
+ * The frame is then taken with spinel_tx_get().
+ */
+void spinel_tx_poll_init(struct k_poll_event *event);
+
+/**
+ * Release a frame of spinel_tx_get(). A nonzero @p err (the frame was not
+ * sent) counts a transport error.
+ */
+void spinel_tx_done(struct net_buf *buf, int err);
 
 /**
  * Hand one Spinel frame received from the host to the core. ISR-safe: the
@@ -69,7 +93,7 @@ enum spinel_stat {
 /** Increment counter @p s. ISR-safe. */
 void spinel_stat_inc(enum spinel_stat s);
 
-/** Queue @p buf, a complete Spinel frame, for the TX thread, which unrefs it. */
+/** Queue @p buf, a complete Spinel frame, for the host. The transport unrefs it. */
 int spinel_send_frame(struct net_buf *buf);
 
 /**

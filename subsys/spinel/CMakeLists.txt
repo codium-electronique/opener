@@ -8,7 +8,7 @@ zephyr_library_include_directories(. lib)
 zephyr_library_sources(lib/spinel.c)
 
 zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_UART hdlc.c)
-zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_SPI spi_link.c spi_handoff.c)
+zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_TRANSPORT_SPI spi_link.c)
 zephyr_library_sources_ifdef(CONFIG_DECTNRP_SPINEL_LEVEL_DRIVER l2.c)
 
 zephyr_library_sources(spinel_core.c spinel_ops.c)

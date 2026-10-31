@@ -7,11 +7,19 @@
  * SPI transport: Spinel frames in the Spinel SPI framing (spi_link.h), the
  * device being the SPI slave of the first enabled opener,spinel-spi node.
  *
- * The device raises IRQ while it has a frame armed for the host, and holds
- * BUSY while the SPI slave is not armed. A thread arms one transaction at a
- * time, with the frame of spinel_transport_send() or none, and sets IRQ
- * before it releases BUSY: a host that waits for BUSY inactive reads a
- * current IRQ. The transaction callback sets BUSY again.
+ * The transport has no sender: one thread takes frames from the core's TX
+ * queue (spinel_tx_get()) and owns each until a transaction clocks it whole
+ * (spinel_tx_done()). It arms one transaction at a time, with the frame in
+ * armed_buf or none. While armed empty and a frame is queued, it takes that
+ * frame as next_buf and raises IRQ: the host's transaction shows no frame,
+ * then next_buf is armed. A frame is armed only before IRQ is raised for it
+ * (set before BUSY is released: a host that waits for BUSY inactive reads a
+ * current IRQ), and the transaction callback sets BUSY again.
+ *
+ * With a frame offered (armed, or taken as next_buf) and no transaction for
+ * CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS, the frames queued behind it are
+ * dropped, so that the TX buffers do not run out without a host. The
+ * offered frame stays.
  *
  * A host frame is received only into a buffer reserved before arming: with
  * none free, the header advertises RECV_LEN 0 and the host sends it again.
@@ -26,9 +34,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/logging/log.h>
 #include <zephyr/net_buf.h>
-#include <zephyr/sys/atomic.h>
 
-#include "spi_handoff.h"
 #include "spi_link.h"
 #include "spinel_internal.h"
 
@@ -38,9 +44,9 @@ LOG_MODULE_DECLARE(dectnrp_spinel, CONFIG_DECTNRP_SPINEL_LOG_LEVEL);
 #define SPINEL_SPI_OP       (SPI_OP_MODE_SLAVE | SPI_WORD_SET(8) | SPI_TRANSFER_MSB)
 #define SPINEL_SPI_BUF_SIZE (SPINEL_SPI_HEADER_LEN + CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE)
 
-/* Bits of thread_events. */
-#define EVENT_XFER_DONE 0
-#define EVENT_FRAME_NEW 1
+/* Events of the wait: the transaction semaphore, and the TX queue while no frame is offered. */
+#define POLL_XFER 0
+#define POLL_TX   1
 
 static const struct spi_dt_spec spi = SPI_DT_SPEC_GET(SPINEL_SPI_NODE, SPINEL_SPI_OP);
 static const struct gpio_dt_spec irq_gpio = GPIO_DT_SPEC_GET(SPINEL_SPI_NODE, irq_gpios);
@@ -54,26 +60,18 @@ static struct net_buf *rx_reserved;
 
 /* Received length of the last transaction, or a negative errno. */
 static int xfer_result;
-static atomic_t thread_events;
-static K_SEM_DEFINE(thread_wake, 0, 1);
+static K_SEM_DEFINE(xfer_done, 0, 1);
 
 /*
- * Hand-off of the frame of spinel_transport_send() to this thread. Arming copies the frame
- * and completing it give the sender its result, both under the hand-off's lock, so that a
- * sender that returned is never read, and a transaction finishing after its sender timed out
- * does not complete the next sender's frame (the frames are numbered).
+ * Frames owned by the SPI thread. armed_buf is the frame copied to tx_buf, NULL when the SPI
+ * slave is armed empty. next_buf is taken from the TX queue while armed empty, and armed by the
+ * next arm(); it is NULL whenever armed_buf is not.
  */
-static struct spinel_spi_handoff handoff;
+static struct net_buf *armed_buf;
+static struct net_buf *next_buf;
 
 static K_THREAD_STACK_DEFINE(spi_stack, CONFIG_DECTNRP_SPINEL_SPI_STACK_SIZE);
 static struct k_thread spi_thread;
-
-/* Wake the SPI thread for a new frame. */
-static void wake_thread(void)
-{
-	atomic_set_bit(&thread_events, EVENT_FRAME_NEW);
-	k_sem_give(&thread_wake);
-}
 
 static void xfer_cb(const struct device *dev, int result, void *data)
 {
@@ -83,76 +81,124 @@ static void xfer_cb(const struct device *dev, int result, void *data)
 	/* The SPI slave is not armed until the thread arms it again. */
 	gpio_pin_set_dt(&busy_gpio, 1);
 	xfer_result = result;
-	atomic_set_bit(&thread_events, EVENT_XFER_DONE);
-	k_sem_give(&thread_wake);
+	k_sem_give(&xfer_done);
 }
 
-/* Arm the pending frame, or none. @return sequence number of the armed frame. */
-static uint32_t arm(void)
+/* Arm the transaction: the frame not yet sent, else next_buf, else the next queued frame. */
+static void arm(void)
 {
-	uint32_t seq;
 	size_t total;
-	size_t frame_len;
-	int ret;
+	int err;
 
 	if (rx_reserved == NULL) {
 		rx_reserved = spinel_rx_buf_alloc();
 	}
 	bool rx_room = rx_reserved != NULL;
 
-	/* The frame is copied under the lock: its sender can return from now on. */
-	ret = spinel_spi_handoff_arm(&handoff, &link, rx_room, tx_buf, sizeof(tx_buf), &total, &seq,
-				     &frame_len);
-	if (ret == -EMSGSIZE) {
+	if (armed_buf == NULL) {
+		armed_buf = next_buf;
+		next_buf = NULL;
+	}
+	if (armed_buf == NULL) {
+		armed_buf = spinel_tx_get(K_NO_WAIT);
+	}
+	if (armed_buf != NULL && armed_buf->len > sizeof(tx_buf) - SPINEL_SPI_HEADER_LEN) {
 		size_t max_len = sizeof(tx_buf) - SPINEL_SPI_HEADER_LEN;
 
-		LOG_ERR("frame of %zu bytes too long for SPI (max %zu)", frame_len, max_len);
-		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
+		LOG_ERR("frame of %u bytes too long for SPI (max %zu)", armed_buf->len, max_len);
+		spinel_tx_done(armed_buf, -EMSGSIZE);
+		armed_buf = NULL;
+	}
+
+	if (armed_buf != NULL) {
+		total = spinel_spi_link_arm(&link, armed_buf->data, armed_buf->len, rx_room, tx_buf,
+					    sizeof(tx_buf));
+	} else {
+		total = spinel_spi_link_arm(&link, NULL, 0, rx_room, tx_buf, sizeof(tx_buf));
 	}
 
 	const struct spi_buf tx = {.buf = tx_buf, .len = total};
 	const struct spi_buf rx = {.buf = rx_buf, .len = sizeof(rx_buf)};
 	const struct spi_buf_set tx_set = {.buffers = &tx, .count = 1};
 	const struct spi_buf_set rx_set = {.buffers = &rx, .count = 1};
-	int err;
 
 	err = spi_transceive_cb(spi.bus, &spi.config, &tx_set, &rx_set, xfer_cb, NULL);
 	if (err != 0) {
 		LOG_ERR("cannot arm the SPI slave (%d)", err);
 		xfer_result = err;
-		atomic_set_bit(&thread_events, EVENT_XFER_DONE);
-		k_sem_give(&thread_wake);
-		return seq;
+		k_sem_give(&xfer_done);
+		return;
 	}
 
-	bool frame_armed = link.armed_len > 0;
+	bool frame_armed = armed_buf != NULL;
 
 	gpio_pin_set_dt(&irq_gpio, frame_armed);
 	gpio_pin_set_dt(&busy_gpio, 0);
-
-	return seq;
 }
 
+/* Drop the frames queued behind the offered one, after a timeout without a transaction. */
+static void drop_queued(void)
+{
+	struct net_buf *buf = spinel_tx_get(K_NO_WAIT);
+	unsigned int dropped = 0;
+
+	while (buf != NULL) {
+		spinel_tx_done(buf, -ETIMEDOUT);
+		dropped++;
+		buf = spinel_tx_get(K_NO_WAIT);
+	}
+	if (dropped > 0) {
+		LOG_WRN("no host clocked a frame in time, dropped %u queued frames", dropped);
+	}
+}
+
+/* Wait for the transaction, and take a frame from the TX queue while armed empty. */
 static void wait_xfer(void)
 {
-	atomic_val_t events;
+	struct k_poll_event events[2];
+	k_timeout_t timeout = K_FOREVER;
 
 	while (true) {
-		k_sem_take(&thread_wake, K_FOREVER);
-		events = atomic_clear(&thread_events);
-		if ((events & BIT(EVENT_FRAME_NEW)) != 0 && link.armed_len == 0) {
-			/* Armed with no frame: the host clocks one transaction to
-			 * see none, then the frame is armed.
-			 */
-			gpio_pin_set_dt(&irq_gpio, 1);
+		bool offered = armed_buf != NULL || next_buf != NULL;
+
+		if (offered) {
+			timeout = K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS);
+		} else {
+			timeout = K_FOREVER;
 		}
-		if ((events & BIT(EVENT_XFER_DONE)) != 0) {
+
+		k_poll_event_init(&events[POLL_XFER], K_POLL_TYPE_SEM_AVAILABLE,
+				  K_POLL_MODE_NOTIFY_ONLY, &xfer_done);
+		uint32_t count = 1;
+
+		if (!offered) {
+			spinel_tx_poll_init(&events[POLL_TX]);
+			count = 2;
+		}
+
+		int err = k_poll(events, count, timeout);
+
+		if (err == -EAGAIN) {
+			drop_queued();
+			continue;
+		}
+		if (count == 2 && events[POLL_TX].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
+			/* Armed empty: the host clocks one transaction to see none, then the
+			 * frame is armed.
+			 */
+			next_buf = spinel_tx_get(K_NO_WAIT);
+			if (next_buf != NULL) {
+				gpio_pin_set_dt(&irq_gpio, 1);
+			}
+		}
+		if (events[POLL_XFER].state == K_POLL_STATE_SEM_AVAILABLE) {
+			k_sem_take(&xfer_done, K_NO_WAIT);
 			return;
 		}
 	}
 }
 
-static void complete(uint32_t seq)
+static void complete(void)
 {
 	struct spinel_spi_result res;
 	int clocked = xfer_result;
@@ -166,7 +212,8 @@ static void complete(uint32_t seq)
 
 	spinel_spi_link_complete(&link, rx_buf, clocked, &res);
 	if (res.sent) {
-		spinel_spi_handoff_done(&handoff, seq);
+		spinel_tx_done(armed_buf, 0);
+		armed_buf = NULL;
 	}
 	if (res.rx_len > 0) {
 		/* The link received a frame only if arm() advertised room. */
@@ -187,13 +234,10 @@ static void spi_thread_fn(void *p1, void *p2, void *p3)
 	ARG_UNUSED(p2);
 	ARG_UNUSED(p3);
 
-	uint32_t seq;
-
 	while (true) {
-		atomic_clear_bit(&thread_events, EVENT_FRAME_NEW);
-		seq = arm();
+		arm();
 		wait_xfer();
-		complete(seq);
+		complete();
 	}
 }
 
@@ -225,7 +269,6 @@ int spinel_transport_init(void)
 		return err;
 	}
 
-	spinel_spi_handoff_init(&handoff, wake_thread);
 	spinel_spi_link_init(&link, CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE);
 
 	k_thread_create(&spi_thread, spi_stack, K_THREAD_STACK_SIZEOF(spi_stack), spi_thread_fn,
@@ -233,17 +276,4 @@ int spinel_transport_init(void)
 	k_thread_name_set(&spi_thread, "spinel_spi");
 
 	return 0;
-}
-
-int spinel_transport_send(const uint8_t *frame, size_t len)
-{
-	int ret;
-
-	ret = spinel_spi_handoff_send(&handoff, frame, len,
-				      K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS));
-	if (ret == -ETIMEDOUT) {
-		LOG_WRN("no host clocked a frame of %zu bytes in time, gave up", len);
-	}
-
-	return ret;
 }

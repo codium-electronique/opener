@@ -21,6 +21,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/gpio/gpio_emul.h>
 #include <zephyr/kernel.h>
+#include <zephyr/sys/byteorder.h>
 #include <zephyr/ztest.h>
 
 #include "fake_spis.h"
@@ -168,6 +169,26 @@ static int recv_frame(uint8_t *frame)
 	return -ENODATA;
 }
 
+/* DRV_STATS GET, TID 1. */
+static const uint8_t drv_stats_get[] = {0x81, 0x02, 0xa0, 0x7a};
+
+/* The transport errors counter of DRV_STATS: the last of 7 u32 LE in the reply. */
+static uint32_t transport_errors(void)
+{
+	uint8_t miso[XFER_LEN];
+	uint8_t frame[HOST_RECV_LEN];
+
+	int sent = host_xfer(drv_stats_get, sizeof(drv_stats_get), miso);
+
+	zassert_equal(sent, 0);
+	int len = recv_frame(frame);
+	size_t head = sizeof(drv_stats_get);
+
+	zassert_equal(len, head + 7 * 4);
+
+	return sys_get_le32(&frame[head + 6 * 4]);
+}
+
 /* Clock out every pending frame, until the device has nothing more for the host. */
 static void drain(void)
 {
@@ -283,6 +304,63 @@ ZTEST(spi_transport, test_transaction_while_busy_ignored)
 
 	zassert_equal(ret, -EAGAIN);
 	zassert_equal(miso[0], 0xff);
+}
+
+ZTEST(spi_transport, test_frames_sent_in_order)
+{
+	uint8_t frame[HOST_RECV_LEN];
+
+	spinel_reply_status(0, 1);
+	spinel_reply_status(0, 2);
+	spinel_reply_status(0, 3);
+
+	for (uint8_t seq = 1; seq <= 3; seq++) {
+		int len = recv_frame(frame);
+
+		zassert_equal(len, 4);
+		zassert_equal(frame[3], seq);
+	}
+	/* Let the SPI thread arm again: it clears IRQ with no frame left. */
+	k_sleep(K_USEC(POLL_US));
+	zassert_false(irq());
+}
+
+ZTEST(spi_transport, test_tx_buffers_released)
+{
+	uint8_t frame[HOST_RECV_LEN];
+
+	for (int i = 0; i < 3 * CONFIG_DECTNRP_SPINEL_TX_BUFS; i++) {
+		spinel_reply_status(0, 1);
+
+		int len = recv_frame(frame);
+
+		zassert_equal(len, 4);
+	}
+}
+
+ZTEST(spi_transport, test_frames_behind_unclocked_frame_dropped)
+{
+	uint8_t frame[HOST_RECV_LEN];
+	uint32_t errors = transport_errors();
+
+	spinel_reply_status(0, 1);
+	k_sleep(K_MSEC(10));
+	spinel_reply_status(0, 2);
+	spinel_reply_status(0, 3);
+	/* The TX timeout is 100 ms and no host clocks. */
+	k_sleep(K_MSEC(250));
+
+	int len = recv_frame(frame);
+
+	zassert_equal(len, 4);
+	/* The offered frame stays. */
+	zassert_equal(frame[3], 1);
+	k_sleep(K_USEC(POLL_US));
+	zassert_false(irq());
+
+	uint32_t dropped = transport_errors() - errors;
+
+	zassert_equal(dropped, 2);
 }
 
 ZTEST_SUITE(spi_transport, NULL, suite_setup, before, NULL, NULL);
