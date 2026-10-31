@@ -10,7 +10,8 @@
  * Ordering: native_sim time only advances when every thread is blocked, so k_sleep() in the
  * test thread lets all Spinel threads settle first. The test thread has a higher priority than
  * the Spinel threads (ZTEST_THREAD_PRIORITY is cooperative): after fake_spis_clock() the SPI
- * thread has not run until the test thread sleeps or blocks.
+ * thread has not run until the test thread sleeps or blocks. The tick is 1 us
+ * (CONFIG_SYS_CLOCK_TICKS_PER_SEC in prj.conf), so a 50 us poll step is really 50 us.
  */
 
 #include <errno.h>
@@ -129,6 +130,8 @@ static int host_xfer(const uint8_t *frame, size_t len, uint8_t *miso)
 
 	int data_len = miso[3] | (miso[4] << 8);
 
+	zassert_true(data_len <= HOST_RECV_LEN, "device frame of %d bytes", data_len);
+
 	if (!first_seen) {
 		memcpy(first_header, miso, SPI_HEADER_LEN);
 		first_seen = true;
@@ -203,8 +206,11 @@ static bool boot_frames_contain(const uint8_t *frame, size_t len)
 
 static void *suite_setup(void)
 {
-	zassert_true(device_is_ready(spis));
-	zassert_true(device_is_ready(gpio));
+	bool spis_ready = device_is_ready(spis);
+	bool gpio_ready = device_is_ready(gpio);
+
+	zassert_true(spis_ready);
+	zassert_true(gpio_ready);
 
 	recording = true;
 	drain();
@@ -232,7 +238,9 @@ ZTEST(spi_transport, test_noop_reply)
 	uint8_t miso[XFER_LEN];
 	uint8_t frame[HOST_RECV_LEN];
 
-	host_xfer(noop, sizeof(noop), miso);
+	int sent = host_xfer(noop, sizeof(noop), miso);
+
+	zassert_equal(sent, 0);
 	int len = recv_frame(frame);
 
 	zassert_equal(len, sizeof(status_ok_tid1));
@@ -251,8 +259,13 @@ ZTEST(spi_transport, test_unsolicited_needs_arming_transaction)
 	/* The device was armed without a frame: this transaction shows none, then the frame is
 	 * armed.
 	 */
-	zassert_equal(host_xfer(NULL, 0, miso), 0);
-	zassert_equal(host_xfer(NULL, 0, miso), sizeof(status_1));
+	int arming = host_xfer(NULL, 0, miso);
+
+	zassert_equal(arming, 0);
+
+	int framed = host_xfer(NULL, 0, miso);
+
+	zassert_equal(framed, sizeof(status_1));
 	zassert_mem_equal(&miso[SPI_HEADER_LEN], status_1, sizeof(status_1));
 }
 
@@ -261,7 +274,9 @@ ZTEST(spi_transport, test_transaction_while_busy_ignored)
 	uint8_t miso[XFER_LEN];
 	uint8_t mosi[XFER_LEN] = {0x02, HOST_RECV_LEN};
 
-	host_xfer(NULL, 0, miso);
+	int first = host_xfer(NULL, 0, miso);
+
+	zassert_equal(first, 0);
 
 	/* No wait: the SPI thread has not armed again, see the ordering note on top. */
 	int ret = fake_spis_clock(spis, mosi, miso, XFER_LEN);
