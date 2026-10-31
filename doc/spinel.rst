@@ -142,7 +142,7 @@ Two lines from the device complete the bus:
 
 A host transaction:
 
-#. Wait until BUSY is inactive.
+#. Wait until BUSY is inactive (see below).
 #. Clock a transaction when IRQ is active or the host has a frame to send:
    the header and its frame, padded to ``5 + 128`` bytes or more.
 #. If the device's ``DATA_LEN`` is longer than the bytes clocked, wait until
@@ -154,14 +154,34 @@ A host transaction:
 The device advertises ``RECV_LEN`` = ``CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE``,
 or 0 while all its ``CONFIG_DECTNRP_SPINEL_RX_BUFS`` receive buffers are in
 use: the host then sends its frame again.
-A frame that no host clocks within ``CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS``
-(default 1000) is counted as a transport error, and the device moves on to
-the next frame. The frame already armed in the SPI slave stays there until a
-host clocks it: a host that connects late first receives that frame, often
-the boot notification. Frames queued while no host clocks are dropped. A host
-that sends ``CMD_NOOP`` right after ``CMD_RESET`` knows that the reset
-notification of its reset is the last one before the ``NOOP`` reply, as the
-device handles frames in order.
+
+The device raises BUSY in software at the end of each transaction, so for
+10 to 25 µs after a transfer returns a host can still read the old, inactive
+level. A transaction started then is ignored by the SPI slave and reads all
+0xff. Before its first transaction a host can rely on the level. A host that
+transacts back to back waits, after each transaction, for a BUSY falling edge
+timestamped after that transaction started, and falls back to the level after
+a bound.
+
+After a transaction that delivered a host frame, the device looks for the
+reply. If no frame is waiting to be sent, it keeps BUSY active for at most
+``CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US`` (default 2000, 0 to 5000, 0
+disables the hold) for the reply to appear, then arms it with IRQ active and
+BUSY inactive. The reply thus comes in the host's next transaction, which can
+carry the host's next request: a round trip takes two transactions. A slower
+reply comes later through the usual IRQ path, in a transaction that shows no
+frame first. There is no hold when the transaction delivered no host frame,
+or when a frame is already waiting.
+
+The frame offered to the host, armed in the SPI slave or taken for the next
+arm, stays offered until a host clocks it, and is not counted as an error: a
+host that connects late first receives that frame, often the boot
+notification. Each time ``CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS`` (default
+1000) passes with a frame offered and no transaction, the frames queued
+behind it are dropped and counted as transport errors. A host that sends
+``CMD_NOOP`` right after ``CMD_RESET`` knows that the reset notification of
+its reset is the last one before the ``NOOP`` reply, as the device handles
+frames in order.
 
 The ``opener,spinel-spi`` node is a child of the SPI slave controller:
 
