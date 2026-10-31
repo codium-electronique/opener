@@ -280,6 +280,10 @@ static void stress_sender_fn(void *p1, void *p2, void *p3)
 
 static void run_stress(int spi_prio, int sender_prio)
 {
+	int finished;
+	int spi_joined;
+	int sender_joined;
+
 	stop = false;
 	copy_window_open = true;
 	completions = 0;
@@ -292,14 +296,16 @@ static void run_stress(int spi_prio, int sender_prio)
 	k_thread_create(&sender_thread, sender_stack, K_THREAD_STACK_SIZEOF(sender_stack),
 			stress_sender_fn, NULL, NULL, NULL, sender_prio, 0, K_NO_WAIT);
 
-	int ret = k_sem_take(&sender_finished, K_SECONDS(60));
+	finished = k_sem_take(&sender_finished, K_SECONDS(60));
 
 	stop = true;
 	copy_window_open = false;
-	k_thread_join(&spi_thread, K_SECONDS(5));
-	k_thread_join(&sender_thread, K_SECONDS(5));
+	spi_joined = k_thread_join(&spi_thread, K_SECONDS(5));
+	sender_joined = k_thread_join(&sender_thread, K_SECONDS(5));
 
-	zassert_equal(ret, 0, "stress sender did not finish");
+	zassert_equal(finished, 0, "stress sender did not finish");
+	zassert_equal(spi_joined, 0, "stress SPI thread did not exit (%d)", spi_joined);
+	zassert_equal(sender_joined, 0, "stress sender did not exit (%d)", sender_joined);
 	zassert_equal(poisoned, 0, "a frame was armed after its sender returned");
 	zassert_equal(sends_ok, completions, "sends %u, completions %u", sends_ok, completions);
 }
