@@ -56,13 +56,15 @@ int spinel_spi_handoff_send(struct spinel_spi_handoff *h, const uint8_t *frame, 
 }
 
 int spinel_spi_handoff_arm(struct spinel_spi_handoff *h, struct spinel_spi_link *link, bool rx_room,
-			   uint8_t *tx_buf, size_t tx_size, size_t *total, uint32_t *seq)
+			   uint8_t *tx_buf, size_t tx_size, size_t *total, uint32_t *seq,
+			   size_t *frame_len)
 {
 	size_t armed;
 	int ret = 0;
 
 	k_mutex_lock(&h->lock, K_FOREVER);
 	*seq = h->seq;
+	*frame_len = h->len;
 	armed = spinel_spi_link_arm(link, h->frame, h->len, rx_room, tx_buf, tx_size);
 	if (armed == 0) {
 		armed = spinel_spi_link_arm(link, NULL, 0, rx_room, tx_buf, tx_size);

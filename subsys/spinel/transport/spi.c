@@ -92,6 +92,7 @@ static uint32_t arm(void)
 {
 	uint32_t seq;
 	size_t total;
+	size_t frame_len;
 	int ret;
 
 	if (rx_reserved == NULL) {
@@ -100,10 +101,12 @@ static uint32_t arm(void)
 	bool rx_room = rx_reserved != NULL;
 
 	/* The frame is copied under the lock: its sender can return from now on. */
-	ret = spinel_spi_handoff_arm(&handoff, &link, rx_room, tx_buf, sizeof(tx_buf), &total,
-				     &seq);
+	ret = spinel_spi_handoff_arm(&handoff, &link, rx_room, tx_buf, sizeof(tx_buf), &total, &seq,
+				     &frame_len);
 	if (ret == -EMSGSIZE) {
-		LOG_ERR("frame too long for SPI");
+		size_t max_len = sizeof(tx_buf) - SPINEL_SPI_HEADER_LEN;
+
+		LOG_ERR("frame of %zu bytes too long for SPI (max %zu)", frame_len, max_len);
 		spinel_stat_inc(SPINEL_STAT_TRANSPORT_ERRORS);
 	}
 

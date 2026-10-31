@@ -44,9 +44,11 @@ static void wake_hook(void)
 static void arm_now(void)
 {
 	size_t total = 0;
+	size_t frame_len = 0;
 	uint32_t seq = 0;
 
-	(void)spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq);
+	(void)spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq,
+				     &frame_len);
 	armed_total = total;
 	armed_seq = seq;
 }
@@ -94,14 +96,17 @@ ZTEST(spinel_spi_handoff, test_timeout_drops_frame)
 {
 	static const uint8_t frame[] = {1, 2, 3};
 	size_t total = 0;
+	size_t frame_len = 0;
 	uint32_t seq = 0;
 	int ret;
 
 	ret = spinel_spi_handoff_send(&handoff, frame, sizeof(frame), K_MSEC(5));
 	zassert_equal(ret, -ETIMEDOUT);
 
-	ret = spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq);
+	ret = spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq,
+				     &frame_len);
 	zassert_equal(ret, 0);
+	zassert_equal(frame_len, 0);
 	zassert_equal(link.armed_len, 0);
 	zassert_equal(total, SPINEL_SPI_HEADER_LEN);
 }
@@ -129,7 +134,9 @@ ZTEST(spinel_spi_handoff, test_late_done_does_not_complete_next)
 ZTEST(spinel_spi_handoff, test_frame_too_long)
 {
 	static uint8_t frame[BUF_SIZE];
+	size_t len = BUF_SIZE - SPINEL_SPI_HEADER_LEN + 1;
 	size_t total = 0;
+	size_t frame_len = 0;
 	uint32_t seq = 0;
 	int ret;
 
@@ -138,11 +145,13 @@ ZTEST(spinel_spi_handoff, test_frame_too_long)
 	/* Publish the frame by hand: no sender is waiting for it. */
 	k_mutex_lock(&handoff.lock, K_FOREVER);
 	handoff.frame = frame;
-	handoff.len = BUF_SIZE - SPINEL_SPI_HEADER_LEN + 1;
+	handoff.len = len;
 	k_mutex_unlock(&handoff.lock);
 
-	ret = spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq);
+	ret = spinel_spi_handoff_arm(&handoff, &link, true, tx_buf, sizeof(tx_buf), &total, &seq,
+				     &frame_len);
 	zassert_equal(ret, -EMSGSIZE);
+	zassert_equal(frame_len, len);
 	zassert_equal(link.armed_len, 0);
 	zassert_equal(total, SPINEL_SPI_HEADER_LEN);
 }
@@ -171,12 +180,13 @@ static void stress_spi_fn(void *p1, void *p2, void *p3)
 
 	while (!stop) {
 		size_t total = 0;
+		size_t frame_len = 0;
 		uint32_t seq = 0;
 		uint32_t wait_us;
 		bool done;
 
 		(void)spinel_spi_handoff_arm(&handoff, &link, true, spi_tx, sizeof(spi_tx), &total,
-					     &seq);
+					     &seq, &frame_len);
 		for (size_t i = SPINEL_SPI_HEADER_LEN; i < total; i++) {
 			if (spi_tx[i] == POISON) {
 				poisoned++;

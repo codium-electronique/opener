@@ -76,12 +76,14 @@ int spinel_spi_handoff_send(struct spinel_spi_handoff *h, const uint8_t *frame, 
  * @param tx_size Size of @p tx_buf.
  * @param total Number of bytes to arm (header and frame).
  * @param seq Number of the pending frame, to pass to spinel_spi_handoff_done().
+ * @param frame_len Length of the pending frame, 0 for none.
  *
  * @retval 0 Armed.
  * @retval -EMSGSIZE The pending frame does not fit: armed without it.
  */
 int spinel_spi_handoff_arm(struct spinel_spi_handoff *h, struct spinel_spi_link *link, bool rx_room,
-			   uint8_t *tx_buf, size_t tx_size, size_t *total, uint32_t *seq);
+			   uint8_t *tx_buf, size_t tx_size, size_t *total, uint32_t *seq,
+			   size_t *frame_len);
 
 /**
  * @brief Complete the frame of @p seq, if it is still pending.
