@@ -242,7 +242,7 @@ int spinel_transport_send(const uint8_t *frame, size_t len)
 	ret = spinel_spi_handoff_send(&handoff, frame, len,
 				      K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS));
 	if (ret == -ETIMEDOUT) {
-		LOG_WRN("no host clocked a frame of %zu bytes, dropped", len);
+		LOG_WRN("no host clocked a frame of %zu bytes in time, gave up", len);
 	}
 
 	return ret;

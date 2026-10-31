@@ -11,6 +11,10 @@
  * the pending frame with the completion signal (done), and the publishing and dropping of a
  * frame (send). A sender that returns, sent or timed out, is never read afterwards, and a
  * completion always belongs to the frame it completes.
+ *
+ * There is one pending frame: only one thread may send at a time (the Spinel TX thread). A
+ * second concurrent sender would replace the pending frame of the first, which would then
+ * time out or be reported sent with the second frame.
  */
 
 #ifndef DECTNRP_SPINEL_SPI_HANDOFF_H_
@@ -51,7 +55,8 @@ void spinel_spi_handoff_init(struct spinel_spi_handoff *h, void (*wake)(void));
 /**
  * @brief Publish a frame, wake the SPI thread and wait until it was sent.
  *
- * After any return the hand-off never reads @p frame again.
+ * After any return the hand-off never reads @p frame again. Not reentrant: callers must
+ * serialize their sends, see the file description.
  *
  * @param h Hand-off.
  * @param frame Frame to send.
@@ -59,7 +64,9 @@ void spinel_spi_handoff_init(struct spinel_spi_handoff *h, void (*wake)(void));
  * @param timeout Time to wait for the frame to be sent.
  *
  * @retval 0 The frame was sent.
- * @retval -ETIMEDOUT The frame was dropped.
+ * @retval -ETIMEDOUT No transaction completed the frame in time, it is no longer pending. A
+ *         copy armed before the timeout may still be clocked out to the host by the transaction
+ *         in progress; that delivery is not reported.
  */
 int spinel_spi_handoff_send(struct spinel_spi_handoff *h, const uint8_t *frame, size_t len,
 			    k_timeout_t timeout);
