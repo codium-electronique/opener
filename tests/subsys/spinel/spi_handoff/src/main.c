@@ -193,11 +193,36 @@ static struct k_thread sender_thread;
 static K_THREAD_STACK_DEFINE(sender_stack, STRESS_STACK);
 
 static volatile bool stop;
+/* Whether the copy window lets other threads run, only while a stress test runs. */
+static volatile bool copy_window_open;
 static uint32_t completions;
 static uint32_t poisoned;
 static uint32_t sends_ok;
 static uint8_t sender_buf[64];
 static struct k_sem sender_finished;
+
+/*
+ * native_sim only switches threads at kernel calls: without this the copy of a frame has no
+ * preemption point, and a copy moved outside the lock would go unnoticed. A busy wait lets a
+ * higher priority sender time out and run, a sleep lets a lower priority one run.
+ */
+void spinel_spi_handoff_test_copy_window(void)
+{
+	uint32_t wait_us;
+	uint32_t choice;
+
+	if (!copy_window_open) {
+		return;
+	}
+
+	wait_us = sys_rand32_get() % 50;
+	choice = sys_rand32_get() % 2;
+	if (choice == 0) {
+		k_busy_wait(wait_us);
+	} else {
+		k_usleep(wait_us);
+	}
+}
 
 static void stress_spi_fn(void *p1, void *p2, void *p3)
 {
@@ -256,6 +281,7 @@ static void stress_sender_fn(void *p1, void *p2, void *p3)
 static void run_stress(int spi_prio, int sender_prio)
 {
 	stop = false;
+	copy_window_open = true;
 	completions = 0;
 	poisoned = 0;
 	sends_ok = 0;
@@ -269,6 +295,7 @@ static void run_stress(int spi_prio, int sender_prio)
 	int ret = k_sem_take(&sender_finished, K_SECONDS(60));
 
 	stop = true;
+	copy_window_open = false;
 	k_thread_join(&spi_thread, K_SECONDS(5));
 	k_thread_join(&sender_thread, K_SECONDS(5));
 

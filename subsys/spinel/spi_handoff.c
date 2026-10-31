@@ -7,6 +7,12 @@
 
 #include "spi_handoff.h"
 
+#ifndef SPINEL_SPI_HANDOFF_TEST_HOOK
+static inline void spinel_spi_handoff_test_copy_window(void)
+{
+}
+#endif
+
 void spinel_spi_handoff_init(struct spinel_spi_handoff *h, void (*wake)(void))
 {
 	k_mutex_init(&h->lock);
@@ -65,6 +71,8 @@ int spinel_spi_handoff_arm(struct spinel_spi_handoff *h, struct spinel_spi_link 
 	k_mutex_lock(&h->lock, K_FOREVER);
 	*seq = h->seq;
 	*frame_len = h->len;
+	/* No-op outside the hand-off test, see spi_handoff.h. */
+	spinel_spi_handoff_test_copy_window();
 	armed = spinel_spi_link_arm(link, h->frame, h->len, rx_room, tx_buf, tx_size);
 	if (armed == 0) {
 		armed = spinel_spi_link_arm(link, NULL, 0, rx_room, tx_buf, tx_size);

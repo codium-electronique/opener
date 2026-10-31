@@ -102,4 +102,15 @@ int spinel_spi_handoff_arm(struct spinel_spi_handoff *h, struct spinel_spi_link 
  */
 bool spinel_spi_handoff_done(struct spinel_spi_handoff *h, uint32_t seq);
 
+#ifdef SPINEL_SPI_HANDOFF_TEST_HOOK
+/**
+ * @brief Test hook, called by spinel_spi_handoff_arm() between taking the pending frame and
+ * copying it.
+ *
+ * Defined by the hand-off test (which defines SPINEL_SPI_HANDOFF_TEST_HOOK) to let other
+ * threads run in that window, so that a copy made outside the lock is caught.
+ */
+void spinel_spi_handoff_test_copy_window(void);
+#endif
+
 #endif /* DECTNRP_SPINEL_SPI_HANDOFF_H_ */
