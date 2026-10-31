@@ -1,0 +1,10 @@
+# Copyright (c) 2026 Codium Electronique
+# SPDX-License-Identifier: Apache-2.0
+
+description: |
+  Fake SPI slave controller for the Spinel SPI transport tests: the test
+  clocks transactions by calling fake_spis_clock().
+
+compatible: "opener,test-fake-spis"
+
+include: spi-controller.yaml
