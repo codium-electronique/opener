@@ -104,6 +104,7 @@ endchoice
 
 config DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 	bool
+	select POLL
 	help
 	  The transport takes frames from the core's TX queue itself
 	  (spinel_tx_get()), so the core starts no TX thread and the

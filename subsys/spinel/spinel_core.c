@@ -125,11 +125,13 @@ struct net_buf *spinel_tx_get(k_timeout_t timeout)
 	return k_fifo_get(&tx_fifo, timeout);
 }
 
+#ifdef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 void spinel_tx_poll_init(struct k_poll_event *event)
 {
 	k_poll_event_init(event, K_POLL_TYPE_FIFO_DATA_AVAILABLE, K_POLL_MODE_NOTIFY_ONLY,
 			  &tx_fifo);
 }
+#endif
 
 void spinel_tx_done(struct net_buf *buf, int err)
 {
@@ -456,6 +458,30 @@ static uint32_t set_prop_drv_filter_short_rxaddr(const uint8_t *data, size_t len
 	return spinel_status_from_errno(err);
 }
 
+/*
+ * Known properties that cannot be SET: the host reads them (DRV_OP_QUEUE only takes INSERT,
+ * DRV_EVENT is device to host).
+ */
+static bool prop_is_read_only(spinel_prop_key_t prop)
+{
+	switch (prop) {
+	case SPINEL_PROP_LAST_STATUS:
+	case SPINEL_PROP_PROTOCOL_VERSION:
+	case SPINEL_PROP_NCP_VERSION:
+	case SPINEL_PROP_INTERFACE_TYPE:
+	case SPINEL_PROP_VENDOR_ID:
+	case SPINEL_PROP_CAPS:
+	case DECTNRP_SPINEL_PROP_DRV_CAPS:
+	case DECTNRP_SPINEL_PROP_DRV_TIME:
+	case DECTNRP_SPINEL_PROP_DRV_STATS:
+	case DECTNRP_SPINEL_PROP_DRV_OP_QUEUE:
+	case DECTNRP_SPINEL_PROP_DRV_EVENT:
+		return true;
+	default:
+		return false;
+	}
+}
+
 static void prop_set(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data, size_t len)
 {
 	uint32_t status;
@@ -474,7 +500,11 @@ static void prop_set(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data, s
 		status = set_prop_drv_filter_short_rxaddr(data, len);
 		break;
 	default:
-		status = SPINEL_STATUS_PROP_NOT_FOUND;
+		if (prop_is_read_only(prop)) {
+			status = SPINEL_STATUS_INVALID_COMMAND_FOR_PROP;
+		} else {
+			status = SPINEL_STATUS_PROP_NOT_FOUND;
+		}
 		break;
 	}
 
@@ -499,11 +529,23 @@ static void prop_insert(uint8_t tid, spinel_prop_key_t prop, const uint8_t *data
 	}
 }
 
-/* Deactivate the RX filters, so that a new host receives every frame. */
-static void clear_filters(void)
+/*
+ * Restore the host-set driver configuration to the state after power-on, so that a new host
+ * starts from the same state: the RX filters inactive, so that it receives every frame, and the
+ * network ID 0, the value the driver boots with (dectnrp_nrf91x1.c starts from a zeroed context).
+ */
+static void clear_host_config(void)
 {
 	struct dectnrp_config config;
 	int err;
+
+	config.network_id = 0;
+	err = drv_configure(DECTNRP_CONFIG_TYPE_NETWORK_ID, &config);
+	if (err == 0) {
+		drv.network_id = 0;
+	} else {
+		LOG_WRN("cannot restore the network ID (%d)", err);
+	}
 
 	config.filter_short_network_id.activate = false;
 	config.filter_short_network_id.value = 0;
@@ -540,7 +582,7 @@ static void cmd_reset(void)
 	/* The OP_FINISHED events are sent before the reset notification. */
 	(void)spinel_ops_reset(timeout);
 
-	clear_filters();
+	clear_host_config();
 
 	spinel_reply_status(0, SPINEL_STATUS_RESET_SOFTWARE);
 }

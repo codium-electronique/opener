@@ -49,11 +49,13 @@ int spinel_transport_send(const uint8_t *frame, size_t len);
  */
 struct net_buf *spinel_tx_get(k_timeout_t timeout);
 
+#ifdef CONFIG_DECTNRP_SPINEL_TRANSPORT_PULLS_TX
 /**
  * Initialize @p event to wait, with k_poll(), for a frame in the TX queue.
  * The frame is then taken with spinel_tx_get().
  */
 void spinel_tx_poll_init(struct k_poll_event *event);
+#endif
 
 /**
  * Release a frame of spinel_tx_get(). A nonzero @p err (the frame was not

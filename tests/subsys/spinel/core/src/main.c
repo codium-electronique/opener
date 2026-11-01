@@ -262,6 +262,33 @@ ZTEST(spinel_core, test_reset_clears_filters)
 	zassert_false(active);
 }
 
+ZTEST(spinel_core, test_reset_clears_network_id)
+{
+	static const uint8_t reset[] = {SPINEL_HEADER_FLAG | 14, SPINEL_CMD_RESET};
+	struct mock_driver *mock = mock_driver_get();
+	const uint8_t *payload;
+	uint32_t value;
+	spinel_ssize_t n;
+	int len;
+
+	send_req(10, SPINEL_CMD_PROP_VALUE_SET, DECTNRP_SPINEL_PROP_DRV_NETWORK_ID, "L",
+		 0x12345678);
+	recv_is(10, DECTNRP_SPINEL_PROP_DRV_NETWORK_ID, &payload);
+	zassert_equal(mock->network_id, 0x12345678);
+
+	send_raw(reset, sizeof(reset));
+	expect_status(0, SPINEL_STATUS_RESET_SOFTWARE);
+
+	/* The driver's boot value. */
+	zassert_equal(mock->network_id, 0);
+
+	send_req(11, SPINEL_CMD_PROP_VALUE_GET, DECTNRP_SPINEL_PROP_DRV_NETWORK_ID, "");
+	len = recv_is(11, DECTNRP_SPINEL_PROP_DRV_NETWORK_ID, &payload);
+	n = spinel_datatype_unpack(payload, len, "L", &value);
+	zassert_true(n > 0);
+	zassert_equal(value, 0);
+}
+
 ZTEST(spinel_core, test_time)
 {
 	struct mock_driver *mock = mock_driver_get();
@@ -336,6 +363,20 @@ ZTEST(spinel_core, test_unknown_prop)
 {
 	send_req(1, SPINEL_CMD_PROP_VALUE_GET, 0x3DFF, "");
 	expect_status(1, SPINEL_STATUS_PROP_NOT_FOUND);
+}
+
+ZTEST(spinel_core, test_set_read_only_prop)
+{
+	send_req(5, SPINEL_CMD_PROP_VALUE_SET, DECTNRP_SPINEL_PROP_DRV_CAPS, "");
+	expect_status(5, SPINEL_STATUS_INVALID_COMMAND_FOR_PROP);
+
+	/* Device to host only. */
+	send_req(6, SPINEL_CMD_PROP_VALUE_SET, DECTNRP_SPINEL_PROP_DRV_EVENT, "");
+	expect_status(6, SPINEL_STATUS_INVALID_COMMAND_FOR_PROP);
+
+	/* Unknown stays unknown. */
+	send_req(7, SPINEL_CMD_PROP_VALUE_SET, 0x3DFF, "");
+	expect_status(7, SPINEL_STATUS_PROP_NOT_FOUND);
 }
 
 ZTEST(spinel_core, test_unknown_cmd)

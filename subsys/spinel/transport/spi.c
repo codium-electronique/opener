@@ -16,16 +16,18 @@
  * that waits for BUSY inactive reads a current IRQ, and the transaction
  * callback sets BUSY again.
  *
- * After a host frame, BUSY is held until the reply is armed, at most
+ * After a host frame, BUSY is held until a reply is available, at most
  * CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US: the reply then comes in the host's
  * next transaction, not after an arming one. The hold is skipped when a frame
- * is already offered or queued. A transaction clocked during the hold finds
- * the SPI slave not armed and is ignored.
+ * is already offered or queued. IRQ is inactive during the hold until a frame
+ * is taken. A transaction clocked during the hold finds the SPI slave not
+ * armed and is ignored.
  *
- * With a frame offered (armed, or taken as next_buf) and no transaction for
- * CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS, the frames queued behind it are
- * dropped, so that the TX buffers do not run out without a host. The
- * offered frame stays.
+ * A frame offered (armed, or taken as next_buf) and not sent within
+ * CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS of its offer makes the frames queued
+ * behind it be dropped, so that the TX buffers do not run out without a
+ * host. The offered frame stays. Only sending the frame restarts the count: a
+ * transaction too short to carry it does not.
  *
  * A host frame is received only into a buffer reserved before arming: with
  * none free, the header advertises RECV_LEN 0 and the host sends it again.
@@ -75,6 +77,14 @@ static K_SEM_DEFINE(xfer_done, 0, 1);
  */
 static struct net_buf *armed_buf;
 static struct net_buf *next_buf;
+/* When the TX timeout of the offered frame ends. Set when a frame is first offered. */
+static k_timepoint_t offer_deadline;
+
+/* A frame was taken from the TX queue and is offered to the host. */
+static void offer_started(void)
+{
+	offer_deadline = sys_timepoint_calc(K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS));
+}
 
 static K_THREAD_STACK_DEFINE(spi_stack, CONFIG_DECTNRP_SPINEL_SPI_STACK_SIZE);
 static struct k_thread spi_thread;
@@ -107,6 +117,9 @@ static void arm(void)
 	}
 	if (armed_buf == NULL) {
 		armed_buf = spinel_tx_get(K_NO_WAIT);
+		if (armed_buf != NULL) {
+			offer_started();
+		}
 	}
 	if (armed_buf != NULL && armed_buf->len > sizeof(tx_buf) - SPINEL_SPI_HEADER_LEN) {
 		size_t max_len = sizeof(tx_buf) - SPINEL_SPI_HEADER_LEN;
@@ -168,7 +181,7 @@ static void wait_xfer(void)
 		bool offered = armed_buf != NULL || next_buf != NULL;
 
 		if (offered) {
-			timeout = K_MSEC(CONFIG_DECTNRP_SPINEL_SPI_TX_TIMEOUT_MS);
+			timeout = sys_timepoint_timeout(offer_deadline);
 		} else {
 			timeout = K_FOREVER;
 		}
@@ -186,6 +199,8 @@ static void wait_xfer(void)
 
 		if (err == -EAGAIN) {
 			drop_queued();
+			/* The offered frame stays: drop again if it is still not sent later. */
+			offer_started();
 			continue;
 		}
 		if (count == 2 && events[POLL_TX].state == K_POLL_STATE_FIFO_DATA_AVAILABLE) {
@@ -194,6 +209,7 @@ static void wait_xfer(void)
 			 */
 			next_buf = spinel_tx_get(K_NO_WAIT);
 			if (next_buf != NULL) {
+				offer_started();
 				gpio_pin_set_dt(&irq_gpio, 1);
 			}
 		}
@@ -221,6 +237,10 @@ static bool complete(void)
 	if (res.sent) {
 		spinel_tx_done(armed_buf, 0);
 		armed_buf = NULL;
+		/* Nothing is offered now (next_buf is NULL while armed_buf is not): IRQ is set
+		 * again if the next arm() or the hold for a reply takes a frame.
+		 */
+		gpio_pin_set_dt(&irq_gpio, 0);
 	}
 	if (res.rx_len > 0) {
 		/* The link received a frame only if arm() advertised room. */
@@ -238,9 +258,9 @@ static bool complete(void)
 }
 
 /*
- * After a host frame, wait for its reply while BUSY is still active, so that arm() arms it.
- * Nothing to wait for if a frame is already offered or queued: spinel_tx_get() then returns
- * at once, and arm() takes the unsent armed_buf or next_buf first.
+ * After a host frame, wait for a frame (its reply) while BUSY is still active, so that arm()
+ * arms it. Nothing to wait for if a frame is already offered: arm() takes the unsent armed_buf
+ * or next_buf first. A frame already queued is returned by spinel_tx_get() at once.
  */
 static void hold_for_reply(void)
 {
@@ -252,6 +272,10 @@ static void hold_for_reply(void)
 	}
 
 	next_buf = spinel_tx_get(K_USEC(CONFIG_DECTNRP_SPINEL_SPI_REPLY_WAIT_US));
+	if (next_buf != NULL) {
+		offer_started();
+		gpio_pin_set_dt(&irq_gpio, 1);
+	}
 }
 
 static void spi_thread_fn(void *p1, void *p2, void *p3)

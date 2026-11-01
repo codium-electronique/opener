@@ -497,4 +497,83 @@ ZTEST(spi_transport, test_transaction_during_hold_ignored)
 	zassert_equal(idle, 0);
 }
 
+/* A transaction of the bare header: too short to carry a device frame. */
+static void short_xfer(void)
+{
+	uint8_t mosi[SPI_HEADER_LEN] = {0x02, HOST_RECV_LEN};
+	uint8_t miso[SPI_HEADER_LEN];
+	bool ready = wait_ready();
+
+	zassert_true(ready, "BUSY stays high");
+
+	int clocked = fake_spis_clock(spis, mosi, miso, sizeof(mosi));
+
+	zassert_equal(clocked, sizeof(mosi));
+}
+
+ZTEST(spi_transport, test_short_xfers_do_not_postpone_drop)
+{
+	uint8_t miso[XFER_LEN];
+	uint8_t frame[HOST_RECV_LEN];
+	uint32_t errors = transport_errors();
+
+	/* Past the reply hold of the statistics request. */
+	drain();
+	spinel_reply_status(0, 1);
+	spinel_reply_status(0, 2);
+	spinel_reply_status(0, 3);
+
+	bool pending = wait_irq();
+
+	zassert_true(pending, "no IRQ");
+
+	/* The arming transaction shows no frame, then frame 1 is armed. */
+	int arming = host_xfer(NULL, 0, miso);
+
+	zassert_equal(arming, 0);
+
+	/* The TX timeout is 100 ms; every transaction is shorter than the frame. */
+	for (int i = 0; i < 8; i++) {
+		k_sleep(K_MSEC(30));
+		short_xfer();
+	}
+	k_sleep(K_USEC(POLL_US));
+
+	int len = recv_frame(frame);
+
+	zassert_equal(len, 4);
+	/* The offered frame stays. */
+	zassert_equal(frame[3], 1);
+
+	uint32_t dropped = transport_errors() - errors;
+
+	zassert_equal(dropped, 2);
+}
+
+ZTEST(spi_transport, test_irq_low_during_reply_hold)
+{
+	uint8_t miso[XFER_LEN];
+
+	spinel_reply_status(0, 5);
+
+	bool pending = wait_irq();
+
+	zassert_true(pending, "no IRQ");
+
+	/* The arming transaction shows no frame; frame 5 is armed. */
+	int arming = host_xfer(not_a_request, sizeof(not_a_request), miso);
+
+	zassert_equal(arming, 0);
+
+	/* This one carries frame 5 away and a host frame that gets no reply. */
+	int sent = host_xfer(not_a_request, sizeof(not_a_request), miso);
+
+	zassert_equal(sent, 4);
+
+	/* Inside the 2 ms hold, with nothing armed. */
+	k_sleep(K_USEC(500));
+	zassert_true(busy());
+	zassert_false(irq());
+}
+
 ZTEST_SUITE(spi_transport, NULL, suite_setup, before, NULL, NULL);
