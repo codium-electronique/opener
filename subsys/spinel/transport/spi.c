@@ -199,7 +199,10 @@ static void wait_xfer(void)
 
 		if (err == -EAGAIN) {
 			drop_queued();
-			/* The offered frame stays: drop again if it is still not sent later. */
+			/* The offered frame stays. The deadline is started again after a drop only
+			 * so that the wait does not spin on an expired timepoint; it does not
+			 * promise the host another full period.
+			 */
 			offer_started();
 			continue;
 		}
@@ -238,7 +241,10 @@ static bool complete(void)
 		spinel_tx_done(armed_buf, 0);
 		armed_buf = NULL;
 		/* Nothing is offered now (next_buf is NULL while armed_buf is not): IRQ is set
-		 * again if the next arm() or the hold for a reply takes a frame.
+		 * again if the next arm() or the hold for a reply takes a frame. When another
+		 * frame is already queued, IRQ pulses low then high between this line and the
+		 * next arm(): harmless, BUSY is still high meanwhile, so the host does not
+		 * clock a transaction on it.
 		 */
 		gpio_pin_set_dt(&irq_gpio, 0);
 	}
