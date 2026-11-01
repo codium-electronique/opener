@@ -12,8 +12,11 @@
 #include <zephyr/drivers/spi.h>
 #include <zephyr/kernel.h>
 #include <zephyr/spinlock.h>
+#include <zephyr/ztest_assert.h>
 
 #include "fake_spis.h"
+
+#define SPI_HEADER_LEN 5
 
 struct fake_spis_data {
 	struct k_spinlock lock;
@@ -48,6 +51,18 @@ static int fake_spis_transceive_async(const struct device *dev, const struct spi
 	int ret = 0;
 
 	ARG_UNUSED(config);
+
+	/* The transport arms one TX and one RX buffer, each at least the 5-byte SPI header. */
+	zassert_equal(tx_bufs->count, 1, "%zu TX buffers", tx_bufs->count);
+	zassert_equal(rx_bufs->count, 1, "%zu RX buffers", rx_bufs->count);
+
+	size_t tx_len_armed = tx_bufs->buffers[0].len;
+	size_t rx_len_armed = rx_bufs->buffers[0].len;
+	size_t rx_len_expected = SPI_HEADER_LEN + CONFIG_DECTNRP_SPINEL_MAX_FRAME_SIZE;
+
+	zassert_true(tx_len_armed >= SPI_HEADER_LEN && tx_len_armed <= rx_len_expected,
+		     "TX of %zu bytes", tx_len_armed);
+	zassert_equal(rx_len_armed, rx_len_expected, "RX of %zu bytes", rx_len_armed);
 
 	key = k_spin_lock(&data->lock);
 	if (data->armed) {
@@ -113,7 +128,8 @@ int fake_spis_clock(const struct device *dev, const uint8_t *mosi, uint8_t *miso
 	memset(&miso[from_tx], 0xfe, len - from_tx);
 	memcpy(rx, mosi, to_rx);
 
-	cb(dev, (int)len, cb_data);
+	/* Like a real SPI slave, report the bytes received, not the bytes clocked. */
+	cb(dev, (int)to_rx, cb_data);
 
 	return (int)len;
 }

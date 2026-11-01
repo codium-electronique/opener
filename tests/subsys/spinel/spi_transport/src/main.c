@@ -43,6 +43,10 @@ static const struct device *const gpio = DEVICE_DT_GET(DT_NODELABEL(gpio0));
  * setup finished.
  */
 static uint8_t first_header[SPI_HEADER_LEN];
+/* RECV_LEN of the last valid device header: the largest frame the device accepts next. It is
+ * zero until the first transaction, so the host sends nothing before it knows.
+ */
+static size_t device_recv_len;
 static bool first_seen;
 static bool recording;
 /* Frames, each prefixed by its length in one byte. */
@@ -115,6 +119,8 @@ static int host_xfer(const uint8_t *frame, size_t len, uint8_t *miso)
 
 	zassert_true(ready, "BUSY stays high");
 	zassert_true(len <= HOST_RECV_LEN);
+	zassert_true(len <= device_recv_len, "frame of %zu bytes, device accepts %zu", len,
+		     device_recv_len);
 
 	mosi[0] = 0x02;
 	mosi[1] = HOST_RECV_LEN & 0xff;
@@ -135,6 +141,8 @@ static int host_xfer(const uint8_t *frame, size_t len, uint8_t *miso)
 	if (!pattern_ok || crc) {
 		return -EBADMSG;
 	}
+
+	device_recv_len = miso[1] | (miso[2] << 8);
 
 	int data_len = miso[3] | (miso[4] << 8);
 
@@ -258,7 +266,9 @@ ZTEST(spi_transport, test_boot_frames)
 {
 	zassert_true(first_seen);
 	zassert_true((first_header[0] & 0x80) != 0, "first header without RST");
-	zassert_true(boot_frames_contain(reset_power_on, sizeof(reset_power_on)));
+	bool has_reset = boot_frames_contain(reset_power_on, sizeof(reset_power_on));
+
+	zassert_true(has_reset);
 }
 
 ZTEST(spi_transport, test_noop_reply)
@@ -307,6 +317,10 @@ ZTEST(spi_transport, test_transaction_while_busy_ignored)
 	zassert_equal(first, 0);
 
 	/* No wait: the SPI thread has not armed again, see the ordering note on top. */
+	bool busy_high = busy();
+
+	zassert_true(busy_high, "BUSY not active after a transaction");
+
 	int ret = fake_spis_clock(spis, mosi, miso, XFER_LEN);
 
 	zassert_equal(ret, -EAGAIN);
@@ -329,7 +343,10 @@ ZTEST(spi_transport, test_frames_sent_in_order)
 	}
 	/* Let the SPI thread arm again: it clears IRQ with no frame left. */
 	k_sleep(K_USEC(POLL_US));
-	zassert_false(irq());
+
+	bool irq_high = irq();
+
+	zassert_false(irq_high);
 }
 
 ZTEST(spi_transport, test_tx_buffers_released)
@@ -363,7 +380,10 @@ ZTEST(spi_transport, test_frames_behind_unclocked_frame_dropped)
 	/* The offered frame stays. */
 	zassert_equal(frame[3], 1);
 	k_sleep(K_USEC(POLL_US));
-	zassert_false(irq());
+
+	bool irq_high = irq();
+
+	zassert_false(irq_high);
 
 	uint32_t dropped = transport_errors() - errors;
 
@@ -378,10 +398,23 @@ ZTEST(spi_transport, test_reply_in_next_transaction)
 
 	zassert_equal(sent, 0);
 
+	/* Until the SPI thread arms the reply, BUSY is high and IRQ is not. No wait here: see the
+	 * ordering note on top.
+	 */
+	bool busy_high = busy();
+	bool irq_in_hold = irq();
+
+	zassert_true(busy_high);
+	zassert_false(irq_in_hold);
+
 	bool ready = wait_ready();
 
 	zassert_true(ready, "BUSY stays high");
-	zassert_true(irq());
+
+	/* The reply is armed with IRQ high for the very next transaction. */
+	bool irq_armed = irq();
+
+	zassert_true(irq_armed);
 
 	int len = host_xfer(NULL, 0, miso);
 
@@ -426,7 +459,10 @@ ZTEST(spi_transport, test_hold_bounded_without_reply)
 	int64_t held_us = k_ticks_to_us_floor64(k_uptime_ticks() - start);
 
 	zassert_true(held_us >= 2000, "held %lld us", held_us);
-	zassert_false(irq());
+
+	bool irq_high = irq();
+
+	zassert_false(irq_high);
 
 	/* A late frame still arrives. */
 	spinel_reply_status(0, 4);
@@ -485,7 +521,10 @@ ZTEST(spi_transport, test_transaction_during_hold_ignored)
 	zassert_equal(sent, 0);
 	/* Inside the 2 ms hold. */
 	k_sleep(K_USEC(500));
-	zassert_true(busy());
+
+	bool busy_high = busy();
+
+	zassert_true(busy_high);
 
 	int ret = fake_spis_clock(spis, mosi, miso, XFER_LEN);
 
@@ -572,8 +611,12 @@ ZTEST(spi_transport, test_irq_low_during_reply_hold)
 
 	/* Inside the 2 ms hold, with nothing armed. */
 	k_sleep(K_USEC(500));
-	zassert_true(busy());
-	zassert_false(irq());
+
+	bool busy_high = busy();
+	bool irq_high = irq();
+
+	zassert_true(busy_high);
+	zassert_false(irq_high);
 }
 
 ZTEST_SUITE(spi_transport, NULL, suite_setup, before, NULL, NULL);
